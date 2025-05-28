@@ -80,19 +80,34 @@ def start_server():
     cmd = [
         "gunicorn",
         "classifier.router.main:app",
-        f"--workers={server_config.get('workers', 4)}",
+        f"--workers={server_config.get('workers', 8)}",
         "--worker-class=uvicorn.workers.UvicornWorker",
-        f"--threads={server_config.get('threads', 2)}",
+        f"--threads={server_config.get('threads', 4)}",
         f"--bind={server_config.get('host', '0.0.0.0')}:{server_config.get('port', 8000)}",
-        "--timeout=120",
-        "--keep-alive=5",
+        f"--timeout={server_config.get('timeout', 120)}",
+        f"--keep-alive={server_config.get('keep_alive', 10)}",
+        f"--max-requests={server_config.get('max_requests', 1000)}",
+        f"--max-requests-jitter={server_config.get('max_requests_jitter', 50)}",
+        f"--worker-connections={server_config.get('worker_connections', 1000)}",
+        f"--backlog={server_config.get('backlog', 2048)}",
         "--access-logfile=-",  # Log access to stdout
         "--error-logfile=-",   # Log errors to stdout
         "--capture-output",    # Capture stdout/stderr from workers
         "--enable-stdio-inheritance",  # Enable stdio inheritance for better logging
         f"--log-level={server_config.get('log_level', 'info').lower()}",
-        "--logger-class=gunicorn.glogging.Logger"  # Use gunicorn's logger
+        "--logger-class=gunicorn.glogging.Logger",  # Use gunicorn's logger
     ]
+    
+    # Add preload app if configured
+    if server_config.get('preload_app', True):
+        cmd.append("--preload")
+    
+    # Add worker restart settings for memory management
+    cmd.extend([
+        "--worker-tmp-dir=/dev/shm",  # Use shared memory for better performance
+        "--graceful-timeout=30",      # Graceful shutdown timeout
+        "--worker-class=uvicorn.workers.UvicornWorker",
+    ])
 
     # Execute gunicorn
     logger.info(f"Starting server with command: {' '.join(cmd)}")
