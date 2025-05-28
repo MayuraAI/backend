@@ -25,7 +25,7 @@ weights:
 
 model_scores:
   models:
-    gpt4:
+    llama3.2:
       cost_per_request: 0.03
       conversation: 0.95
       classification: 0.90
@@ -42,7 +42,7 @@ model_scores:
       research: 0.93
       extraction: 0.90
 
-    gpt35:
+    gpt4:
       cost_per_request: 0.01
       conversation: 0.85
       classification: 0.82
