@@ -1,0 +1,67 @@
+model:
+  name: "sentence-transformers/all-distilroberta-v1"
+  save_dir: "classifier/models"
+  embedding_dim: 768
+
+categories:
+  - conversation
+  - classification
+  - roleplay
+  - data_analysis
+  - translation
+  - problem_solving
+  - reasoning
+  - code_generation
+  - writing
+  - summarization
+  - math
+  - creative
+  - research
+  - extraction
+
+weights:
+  quality: 0.7
+  cost: 0.3
+
+model_scores:
+  models:
+    gpt4:
+      cost_per_request: 0.03
+      conversation: 0.95
+      classification: 0.90
+      roleplay: 0.95
+      data_analysis: 0.92
+      translation: 0.88
+      problem_solving: 0.95
+      reasoning: 0.96
+      code_generation: 0.94
+      writing: 0.93
+      summarization: 0.91
+      math: 0.94
+      creative: 0.92
+      research: 0.93
+      extraction: 0.90
+
+    gpt35:
+      cost_per_request: 0.01
+      conversation: 0.85
+      classification: 0.82
+      roleplay: 0.84
+      data_analysis: 0.80
+      translation: 0.82
+      problem_solving: 0.83
+      reasoning: 0.84
+      code_generation: 0.85
+      writing: 0.83
+      summarization: 0.84
+      math: 0.82
+      creative: 0.83
+      research: 0.81
+      extraction: 0.82
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  threads: 4
+  log_level: "INFO" 
