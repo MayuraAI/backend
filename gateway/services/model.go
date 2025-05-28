@@ -2,11 +2,13 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -38,6 +40,50 @@ type ModelScore struct {
 	FinalScore        float64 `json:"final_score"`
 }
 
+// Circuit breaker states
+type CircuitState int
+
+const (
+	Closed CircuitState = iota
+	Open
+	HalfOpen
+)
+
+// Circuit breaker for classifier service
+type CircuitBreaker struct {
+	mu               sync.RWMutex
+	state            CircuitState
+	failureCount     int
+	lastFailureTime  time.Time
+	successCount     int
+	failureThreshold int
+	recoveryTimeout  time.Duration
+	halfOpenMaxCalls int
+}
+
+// Global instances
+var (
+	// Circuit breaker for classifier service
+	classifierCircuit = &CircuitBreaker{
+		failureThreshold: 5,
+		recoveryTimeout:  30 * time.Second,
+		halfOpenMaxCalls: 3,
+	}
+
+	// Optimized HTTP client for classifier requests
+	classifierClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        50,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DisableKeepAlives:   false,
+			DisableCompression:  false,
+		},
+	}
+)
+
 // getClassifierURL returns the classifier service URL from environment or default
 func getClassifierURL() string {
 	if url := os.Getenv("CLASSIFIER_URL"); url != "" {
@@ -46,9 +92,70 @@ func getClassifierURL() string {
 	return "http://localhost:8000" // Default for local development
 }
 
-// CallModelService calls the local model service and returns the response
+// Circuit breaker methods
+func (cb *CircuitBreaker) canExecute() bool {
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
+
+	switch cb.state {
+	case Closed:
+		return true
+	case Open:
+		return time.Since(cb.lastFailureTime) >= cb.recoveryTimeout
+	case HalfOpen:
+		return cb.successCount < cb.halfOpenMaxCalls
+	}
+	return false
+}
+
+func (cb *CircuitBreaker) onSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.failureCount = 0
+	if cb.state == HalfOpen {
+		cb.successCount++
+		if cb.successCount >= cb.halfOpenMaxCalls {
+			cb.state = Closed
+			cb.successCount = 0
+		}
+	}
+}
+
+func (cb *CircuitBreaker) onFailure() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.failureCount++
+	cb.lastFailureTime = time.Now()
+
+	if cb.state == Closed && cb.failureCount >= cb.failureThreshold {
+		cb.state = Open
+	} else if cb.state == HalfOpen {
+		cb.state = Open
+		cb.successCount = 0
+	}
+}
+
+func (cb *CircuitBreaker) setState(state CircuitState) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.state = state
+}
+
+// CallModelService calls the local model service with optimizations
 func CallModelService(prompt string) (ModelResponse, error) {
 	startTime := time.Now()
+
+	// Check circuit breaker
+	if !classifierCircuit.canExecute() {
+		return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
+	}
+
+	// If circuit breaker is in half-open state, transition it
+	if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
+		classifierCircuit.setState(HalfOpen)
+	}
 
 	// Prepare the request
 	reqBody := ModelRequest{
@@ -60,25 +167,43 @@ func CallModelService(prompt string) (ModelResponse, error) {
 		return ModelResponse{}, fmt.Errorf("error marshaling request: %v", err)
 	}
 
-	// Get classifier URL from environment
-	classifierURL := getClassifierURL()
+	// Create request with context and timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
 
-	// Make the request to the model service
-	resp, err := http.Post(
-		classifierURL+"/complete",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
+	classifierURL := getClassifierURL()
+	req, err := http.NewRequestWithContext(ctx, "POST", classifierURL+"/complete", bytes.NewBuffer(jsonData))
 	if err != nil {
+		classifierCircuit.onFailure()
+		return ModelResponse{}, fmt.Errorf("error creating request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Connection", "keep-alive")
+
+	// Make the request using optimized client
+	resp, err := classifierClient.Do(req)
+	if err != nil {
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error calling model service: %v", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		classifierCircuit.onFailure()
+		return ModelResponse{}, fmt.Errorf("classifier service returned status %d", resp.StatusCode)
+	}
+
 	// Parse the response
 	var modelResp ModelResponse
 	if err := json.NewDecoder(resp.Body).Decode(&modelResp); err != nil {
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error decoding response: %v", err)
 	}
+
+	// Success - update circuit breaker
+	classifierCircuit.onSuccess()
 
 	// Log the response details
 	logModelResponse(modelResp, time.Since(startTime))
@@ -88,27 +213,18 @@ func CallModelService(prompt string) (ModelResponse, error) {
 
 // logModelResponse logs the model response details in a formatted way
 func logModelResponse(resp ModelResponse, requestTime time.Duration) {
-	log.Printf("\n=== Model Service Response ===\n")
-	log.Printf("Selected Model: %s\n", resp.Metadata.SelectedModel)
-	log.Printf("Confidence: %.2f\n", resp.Metadata.Confidence)
-	log.Printf("Processing Time: %.2fms\n", resp.Metadata.ProcessingTime*1000)
-	log.Printf("Predicted Category: %s\n", resp.Metadata.PredictedCategory)
+	log.Printf("🧠 Model Service Response (%.2fms):", requestTime.Seconds()*1000)
+	log.Printf("   Selected: %s (%.1f%% confidence)", resp.Metadata.SelectedModel, resp.Metadata.Confidence*100)
+	log.Printf("   Category: %s (%.2fms processing)", resp.Metadata.PredictedCategory, resp.Metadata.ProcessingTime*1000)
+}
 
-	log.Printf("\nCategory Probabilities:\n")
-	for category, prob := range resp.Metadata.CategoryProbabilities {
-		log.Printf("  %-20s: %.2f%%\n", category, prob*100)
+// GetCircuitBreakerStats returns circuit breaker statistics for monitoring
+func GetCircuitBreakerStats() map[string]interface{} {
+	classifierCircuit.mu.RLock()
+	defer classifierCircuit.mu.RUnlock()
+
+	return map[string]interface{}{
+		"circuit_state": classifierCircuit.state,
+		"failure_count": classifierCircuit.failureCount,
 	}
-
-	log.Printf("\nModel Scores:\n")
-	for model, score := range resp.Metadata.ModelScores {
-		log.Printf("  %s:\n", model)
-		log.Printf("    Quality Score: %.2f\n", score.QualityScore)
-		log.Printf("    Normalized Quality: %.2f\n", score.NormalizedQuality)
-		log.Printf("    Cost: $%.2f\n", score.Cost)
-		log.Printf("    Normalized Cost: %.2f\n", score.NormalizedCost)
-		log.Printf("    Final Score: %.2f\n", score.FinalScore)
-	}
-
-	log.Printf("\nRequest Processing Time: %v\n", requestTime)
-	log.Printf("===========================\n")
 }
