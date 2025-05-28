@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -37,6 +38,14 @@ type ModelScore struct {
 	FinalScore        float64 `json:"final_score"`
 }
 
+// getClassifierURL returns the classifier service URL from environment or default
+func getClassifierURL() string {
+	if url := os.Getenv("CLASSIFIER_URL"); url != "" {
+		return url
+	}
+	return "http://localhost:8000" // Default for local development
+}
+
 // CallModelService calls the local model service and returns the response
 func CallModelService(prompt string) (ModelResponse, error) {
 	startTime := time.Now()
@@ -51,9 +60,12 @@ func CallModelService(prompt string) (ModelResponse, error) {
 		return ModelResponse{}, fmt.Errorf("error marshaling request: %v", err)
 	}
 
-	// Make the request to the local model service
+	// Get classifier URL from environment
+	classifierURL := getClassifierURL()
+
+	// Make the request to the model service
 	resp, err := http.Post(
-		"http://localhost:8000/complete",
+		classifierURL+"/complete",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
