@@ -2,6 +2,8 @@ model:
   name: "sentence-transformers/all-MiniLM-L6-v2"
   save_dir: "classifier/models"
   embedding_dim: 768
+  cache_embeddings: true
+  max_cache_size: 10000
 
 categories:
   - conversation
@@ -62,6 +64,13 @@ model_scores:
 server:
   host: "0.0.0.0"
   port: 8000
-  workers: 4
-  threads: 2
-  log_level: "INFO" 
+  workers: 8
+  threads: 4
+  log_level: "INFO"
+  timeout: 120
+  keep_alive: 10
+  max_requests: 1000
+  max_requests_jitter: 50
+  preload_app: true
+  worker_connections: 1000
+  backlog: 2048 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	// "backend/middleware"
@@ -26,145 +28,264 @@ type RequestBody struct {
 	Message string `json:"message,omitempty"`
 }
 
-func ClientHandler(w http.ResponseWriter, r *http.Request) {
-	// Get user from context
-	// user, ok := middleware.GetUserFromContext(r.Context())
-	// if !ok {
-	// 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
-	// 	return
-	// }
+// Global metrics for monitoring
+var (
+	activeConnections int64
+	totalRequests     int64
+	totalErrors       int64
+)
 
-	// Read request body
+// ClientHandler handles streaming chat completions with optimizations
+func ClientHandler(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	clientID := rand.Intn(1000000)
+
+	// Increment metrics
+	atomic.AddInt64(&totalRequests, 1)
+	atomic.AddInt64(&activeConnections, 1)
+	defer atomic.AddInt64(&activeConnections, -1)
+
+	// Set optimized response headers for streaming
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Validate flusher capability
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		atomic.AddInt64(&totalErrors, 1)
+		return
+	}
+
+	// Read and validate request body with size limit
 	var reqBody models.RequestBody
 	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
+		// Limit request body size to 1MB
+		limitedReader := io.LimitReader(r.Body, 1024*1024)
+		body, err := io.ReadAll(limitedReader)
 		if err != nil {
-			http.Error(w, "Error reading request body", http.StatusBadRequest)
+			sendErrorResponse(w, flusher, "Error reading request body", clientID)
+			atomic.AddInt64(&totalErrors, 1)
 			return
 		}
+
 		if len(body) > 0 {
 			if err := json.Unmarshal(body, &reqBody); err != nil {
-				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				sendErrorResponse(w, flusher, "Invalid request body", clientID)
+				atomic.AddInt64(&totalErrors, 1)
 				return
 			}
 		}
 	}
 
-	// Set response headers for streaming
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	// Flusher to flush data to client
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+	// Validate message content
+	if strings.TrimSpace(reqBody.Message) == "" {
+		sendErrorResponse(w, flusher, "Message cannot be empty", clientID)
+		atomic.AddInt64(&totalErrors, 1)
 		return
 	}
 
-	// Assign a random ID to this client
-	clientID := rand.Intn(1000000)
+	// Limit message length
+	if len(reqBody.Message) > 10000 {
+		sendErrorResponse(w, flusher, "Message too long (max 10,000 characters)", clientID)
+		atomic.AddInt64(&totalErrors, 1)
+		return
+	}
 
-	// Call the model service to get the selected model
-	modelResponse, err := services.CallModelService(reqBody.Message)
+	log.Printf("🔗 Client %d connected, processing request (%.2fms)", clientID, time.Since(startTime).Seconds()*1000)
+
+	// Create context with timeout for the entire request
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+
+	// Monitor context cancellation (client disconnect)
+	go func() {
+		<-ctx.Done()
+		if ctx.Err() == context.Canceled {
+			log.Printf("🔌 Client %d disconnected", clientID)
+		} else if ctx.Err() == context.DeadlineExceeded {
+			log.Printf("⏰ Client %d request timeout", clientID)
+		}
+	}()
+
+	// Call the model service with timeout
+	modelResponse, err := callModelServiceWithTimeout(ctx, reqBody.Message)
 	if err != nil {
-		log.Printf("Error calling model service: %v", err)
-		// Send error response and close
-		errorResponse := models.Response{
-			Message:   fmt.Sprintf("Error: %v", err),
-			Content:   fmt.Sprintf("Error: %v", err),
-			Type:      "error",
-			Timestamp: time.Now().Format(time.RFC3339),
-			UserID:    "user_id",
-			Model:     "error",
-		}
-		msg, _ := models.FormatSSEMessage(errorResponse)
-		fmt.Fprint(w, msg)
-		flusher.Flush()
+		log.Printf("❌ Client %d: Model service error: %v", clientID, err)
+		sendErrorResponse(w, flusher, fmt.Sprintf("Model service error: %v", err), clientID)
+		atomic.AddInt64(&totalErrors, 1)
 		return
 	}
 
-	// Check if the selected model is llama3.2
-	selectedModel := strings.ToLower(modelResponse.Model)
-	if selectedModel == "llama3.2" {
-		log.Printf("Selected model is llama3.2, streaming from Ollama...")
+	log.Printf("🧠 Client %d: Selected model %s (%.1f%% confidence)",
+		clientID, modelResponse.Metadata.SelectedModel, modelResponse.Metadata.Confidence*100)
 
-		// Stream response from Ollama
-		err := services.StreamOllamaResponse("llama3.2", reqBody.Message, func(chunk string) error {
-			// Send only the new chunk, not the accumulated response
-			response := models.Response{
-				Message:   chunk,
-				Content:   chunk, // For frontend compatibility
-				Type:      "chunk",
-				Timestamp: time.Now().Format(time.RFC3339),
-				UserID:    "user_id",
-				Model:     "llama3.2",
-			}
-
-			msg, err := models.FormatSSEMessage(response)
-			if err != nil {
-				return err
-			}
-
-			_, err = fmt.Fprint(w, msg)
-			if err != nil {
-				return err
-			}
-			flusher.Flush()
-			return nil
-		})
-
+	// Handle llama3.2 model with streaming
+	if modelResponse.Metadata.SelectedModel == "llama3.2" {
+		err := streamLlamaResponse(ctx, w, flusher, reqBody.Message, clientID)
 		if err != nil {
-			log.Printf("Error streaming from Ollama: %v", err)
-			// Send error message
-			errorResponse := models.Response{
-				Message:   fmt.Sprintf("Ollama Error: %v", err),
-				Content:   fmt.Sprintf("Ollama Error: %v", err),
-				Type:      "error",
-				Timestamp: time.Now().Format(time.RFC3339),
-				UserID:    "user_id",
-				Model:     "llama3.2",
-			}
-			msg, _ := models.FormatSSEMessage(errorResponse)
-			fmt.Fprint(w, msg)
-			flusher.Flush()
+			log.Printf("❌ Client %d: Streaming error: %v", clientID, err)
+			sendErrorResponse(w, flusher, fmt.Sprintf("Streaming error: %v", err), clientID)
+			atomic.AddInt64(&totalErrors, 1)
+			return
+		}
+	} else {
+		// For other models, send immediate response
+		sendImmediateResponse(w, flusher, reqBody.Message, clientID)
+	}
+
+	totalTime := time.Since(startTime)
+	log.Printf("✅ Client %d: Request completed (%.2fs)", clientID, totalTime.Seconds())
+}
+
+// callModelServiceWithTimeout calls the model service with context timeout
+func callModelServiceWithTimeout(ctx context.Context, message string) (services.ModelResponse, error) {
+	// Create a channel to receive the result
+	resultChan := make(chan struct {
+		response services.ModelResponse
+		err      error
+	}, 1)
+
+	// Call model service in goroutine
+	go func() {
+		response, err := services.CallModelService(message)
+		resultChan <- struct {
+			response services.ModelResponse
+			err      error
+		}{response, err}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case result := <-resultChan:
+		return result.response, result.err
+	case <-ctx.Done():
+		return services.ModelResponse{}, ctx.Err()
+	}
+}
+
+// streamLlamaResponse handles streaming response from Ollama
+func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, message string, clientID int) error {
+	chunkCount := 0
+	startTime := time.Now()
+
+	// Stream response from Ollama with context monitoring
+	err := services.StreamOllamaResponse("llama3.2", message, func(chunk string) error {
+		// Check if client disconnected
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 
-		// Send a final message to indicate completion
-		finalResponse := models.Response{
-			Message:   "[DONE]",
-			Content:   "[DONE]",
-			Type:      "done",
+		chunkCount++
+
+		// Send only the new chunk (bandwidth optimized)
+		response := models.Response{
+			Message:   chunk,
+			Content:   chunk,
+			Type:      "chunk",
 			Timestamp: time.Now().Format(time.RFC3339),
 			UserID:    "user_id",
 			Model:     "llama3.2",
 		}
-		msg, _ := models.FormatSSEMessage(finalResponse)
-		fmt.Fprint(w, msg)
-		flusher.Flush()
 
-		// Connection will close automatically when function returns
-		return
+		msg, err := models.FormatSSEMessage(response)
+		if err != nil {
+			return err
+		}
+
+		_, err = fmt.Fprint(w, msg)
+		if err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
+
+	if err != nil {
+		// Check if error is due to context cancellation
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
 	}
 
-	// For other models, use the original response generation
-	response := models.GenerateResponse(clientID, "user_id", reqBody.Message)
+	// Send completion signal
+	finalResponse := models.Response{
+		Message:   "[DONE]",
+		Content:   "[DONE]",
+		Type:      "done",
+		Timestamp: time.Now().Format(time.RFC3339),
+		UserID:    "user_id",
+		Model:     "llama3.2",
+	}
+
+	msg, _ := models.FormatSSEMessage(finalResponse)
+	fmt.Fprint(w, msg)
+	flusher.Flush()
+
+	streamTime := time.Since(startTime)
+	log.Printf("🦙 Client %d: Streamed %d chunks in %.2fs", clientID, chunkCount, streamTime.Seconds())
+
+	return nil
+}
+
+// sendImmediateResponse sends a non-streaming response
+func sendImmediateResponse(w http.ResponseWriter, flusher http.Flusher, message string, clientID int) {
+	response := models.GenerateResponse(clientID, "user_id", message)
 	response.Timestamp = time.Now().Format(time.RFC3339)
 
-	// Format the response as SSE message
 	msg, err := models.FormatSSEMessage(response)
 	if err != nil {
-		log.Printf("Error formatting SSE message: %v", err)
-		http.Error(w, "Error formatting response", http.StatusInternalServerError)
+		log.Printf("❌ Client %d: Error formatting response: %v", clientID, err)
 		return
 	}
 
-	// Send the response
-	_, err = fmt.Fprint(w, msg)
+	fmt.Fprint(w, msg)
+	flusher.Flush()
+}
+
+// sendErrorResponse sends an error response in SSE format
+func sendErrorResponse(w http.ResponseWriter, flusher http.Flusher, errorMsg string, clientID int) {
+	errorResponse := models.Response{
+		Message:   fmt.Sprintf("Error: %s", errorMsg),
+		Content:   fmt.Sprintf("Error: %s", errorMsg),
+		Type:      "error",
+		Timestamp: time.Now().Format(time.RFC3339),
+		UserID:    "user_id",
+		Model:     "error",
+	}
+
+	msg, err := models.FormatSSEMessage(errorResponse)
 	if err != nil {
-		log.Printf("Error sending response: %v", err)
+		log.Printf("❌ Client %d: Error formatting error response: %v", clientID, err)
+		http.Error(w, errorMsg, http.StatusInternalServerError)
 		return
 	}
+
+	fmt.Fprint(w, msg)
 	flusher.Flush()
+}
+
+// GetMetrics returns current performance metrics
+func GetMetrics() map[string]interface{} {
+	return map[string]interface{}{
+		"active_connections":    atomic.LoadInt64(&activeConnections),
+		"total_requests":        atomic.LoadInt64(&totalRequests),
+		"total_errors":          atomic.LoadInt64(&totalErrors),
+		"error_rate":            float64(atomic.LoadInt64(&totalErrors)) / float64(atomic.LoadInt64(&totalRequests)),
+		"circuit_breaker_stats": services.GetCircuitBreakerStats(),
+	}
 }
