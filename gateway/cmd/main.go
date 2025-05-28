@@ -4,7 +4,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	// "os"
+	"os"
 	"time"
 
 	"gateway/handlers"
@@ -19,7 +19,7 @@ func main() {
 	// Get JWT secret from environment variable
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Printf("Warning: Error loading .env file: %v", err)
 	}
 	// supabaseJWTSecret := os.Getenv("SUPABASE_JWT_SECRET")
 	// if supabaseJWTSecret == "" {
@@ -28,6 +28,9 @@ func main() {
 
 	// Create a new mux router
 	mux := http.NewServeMux()
+
+	// Health check endpoint
+	mux.HandleFunc("/health", handlers.HealthHandler)
 
 	// Protected route with auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +42,17 @@ func main() {
 		http.HandlerFunc(handlers.ClientHandler).ServeHTTP(w, r)
 	})
 
-	port := ":8080"
-	log.Printf("SSE server (unique per client) running on %s", port)
+	// Get port from environment or use default
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	port = ":" + port
+
+	log.Printf("Gateway server running on %s", port)
+	log.Printf("Health check available at %s/health", port)
+	log.Printf("Complete endpoint available at %s/complete", port)
+
 	if err := http.ListenAndServe(port, mux); err != nil {
 		log.Fatal(err)
 	}

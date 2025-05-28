@@ -73,6 +73,8 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		// Send error response and close
 		errorResponse := models.Response{
 			Message:   fmt.Sprintf("Error: %v", err),
+			Content:   fmt.Sprintf("Error: %v", err),
+			Type:      "error",
 			Timestamp: time.Now().Format(time.RFC3339),
 			UserID:    "user_id",
 			Model:     "error",
@@ -88,17 +90,13 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	if selectedModel == "llama3.2" {
 		log.Printf("Selected model is llama3.2, streaming from Ollama...")
 
-		// Accumulate the full response
-		var fullResponse strings.Builder
-
 		// Stream response from Ollama
 		err := services.StreamOllamaResponse("llama3.2", reqBody.Message, func(chunk string) error {
-			// Accumulate the chunk
-			fullResponse.WriteString(chunk)
-
-			// Create SSE message with accumulated text
+			// Send only the new chunk, not the accumulated response
 			response := models.Response{
-				Message:   fullResponse.String(),
+				Message:   chunk,
+				Content:   chunk, // For frontend compatibility
+				Type:      "chunk",
 				Timestamp: time.Now().Format(time.RFC3339),
 				UserID:    "user_id",
 				Model:     "llama3.2",
@@ -122,6 +120,8 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 			// Send error message
 			errorResponse := models.Response{
 				Message:   fmt.Sprintf("Ollama Error: %v", err),
+				Content:   fmt.Sprintf("Ollama Error: %v", err),
+				Type:      "error",
 				Timestamp: time.Now().Format(time.RFC3339),
 				UserID:    "user_id",
 				Model:     "llama3.2",
@@ -134,6 +134,8 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		// Send a final message to indicate completion
 		finalResponse := models.Response{
 			Message:   "[DONE]",
+			Content:   "[DONE]",
+			Type:      "done",
 			Timestamp: time.Now().Format(time.RFC3339),
 			UserID:    "user_id",
 			Model:     "llama3.2",

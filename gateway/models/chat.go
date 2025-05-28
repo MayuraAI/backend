@@ -8,6 +8,8 @@ import (
 
 type Response struct {
 	Message   string `json:"message"`
+	Content   string `json:"content,omitempty"` // For frontend compatibility
+	Type      string `json:"type,omitempty"`    // "chunk", "done", "error"
 	Timestamp string `json:"timestamp"`
 	UserID    string `json:"user_id,omitempty"`
 	Model     string `json:"model,omitempty"`
