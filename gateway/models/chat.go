@@ -7,10 +7,10 @@ import (
 )
 
 type Response struct {
-	Message   string `json:"message"`
-	Content   string `json:"content,omitempty"` // For frontend compatibility
-	Type      string `json:"type,omitempty"`    // "chunk", "done", "error"
-	Timestamp string `json:"timestamp"`
+	Message   string `json:"message,omitempty"` // Holds content for "chunk" type, or full message for others
+	Content   string `json:"content,omitempty"` // Kept for potential frontend compatibility, can be removed if not used
+	Type      string `json:"type"`              // "start", "chunk", "end", "error"
+	Timestamp string `json:"timestamp,omitempty"`
 	UserID    string `json:"user_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 }
@@ -31,6 +31,7 @@ func GenerateResponse(clientID int, userID string, reqMessage string) Response {
 		Timestamp: time.Now().Format(time.RFC3339),
 		UserID:    userID,
 		Model:     "default",
+		Type:      "default", // Added a default type
 	}
 }
 
