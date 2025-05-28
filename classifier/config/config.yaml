@@ -1,5 +1,5 @@
 model:
-  name: "sentence-transformers/all-distilroberta-v1"
+  name: "sentence-transformers/all-MiniLM-L6-v2"
   save_dir: "classifier/models"
   embedding_dim: 768
 
@@ -62,6 +62,6 @@ model_scores:
 server:
   host: "0.0.0.0"
   port: 8000
-  workers: 2
-  threads: 4
+  workers: 4
+  threads: 2
   log_level: "INFO" 
