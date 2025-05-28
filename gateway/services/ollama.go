@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 )
 
 // OllamaRequest represents the request to Ollama API
@@ -25,6 +26,14 @@ type OllamaResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// getOllamaURL returns the Ollama service URL from environment or default
+func getOllamaURL() string {
+	if url := os.Getenv("OLLAMA_URL"); url != "" {
+		return url
+	}
+	return "http://localhost:11434" // Default for local development
+}
+
 // StreamOllamaResponse calls Ollama API and streams the response
 func StreamOllamaResponse(model, prompt string, responseWriter func(string) error) error {
 	// Prepare the request
@@ -39,9 +48,12 @@ func StreamOllamaResponse(model, prompt string, responseWriter func(string) erro
 		return fmt.Errorf("error marshaling request: %v", err)
 	}
 
+	// Get Ollama URL from environment
+	ollamaURL := getOllamaURL()
+
 	// Make the request to Ollama API
 	resp, err := http.Post(
-		"http://localhost:11434/api/generate",
+		ollamaURL+"/api/generate",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
@@ -101,9 +113,12 @@ func CallOllamaAPI(model, prompt string) (string, error) {
 		return "", fmt.Errorf("error marshaling request: %v", err)
 	}
 
+	// Get Ollama URL from environment
+	ollamaURL := getOllamaURL()
+
 	// Make the request to Ollama API
 	resp, err := http.Post(
-		"http://localhost:11434/api/generate",
+		ollamaURL+"/api/generate",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
