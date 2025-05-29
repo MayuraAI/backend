@@ -180,8 +180,25 @@ func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 	chunkCount := 0
 	startTime := time.Now()
 
+	// Send a "start" event with metadata
+	startResponse := models.Response{
+		Type:      "start",
+		Timestamp: time.Now().Format(time.RFC3339),
+		UserID:    "user_id", // Replace with actual user ID if available
+		Model:     "llama3.2",
+	}
+	msg, err := models.FormatSSEMessage(startResponse)
+	if err != nil {
+		return fmt.Errorf("error formatting start event: %v", err)
+	}
+	_, err = fmt.Fprint(w, msg)
+	if err != nil {
+		return fmt.Errorf("error sending start event: %v", err)
+	}
+	flusher.Flush()
+
 	// Stream response from Ollama with context monitoring
-	err := services.StreamOllamaResponse("llama3.2", message, func(chunk string) error {
+	err = services.StreamOllamaResponse("llama3.2", message, func(chunk string) error {
 		// Check if client disconnected
 		select {
 		case <-ctx.Done():
@@ -191,17 +208,13 @@ func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 
 		chunkCount++
 
-		// Send only the new chunk (bandwidth optimized)
-		response := models.Response{
-			Message:   chunk,
-			Content:   chunk,
-			Type:      "chunk",
-			Timestamp: time.Now().Format(time.RFC3339),
-			UserID:    "user_id",
-			Model:     "llama3.2",
+		// Send only the new chunk
+		chunkResponse := models.Response{
+			Message: chunk,
+			Type:    "chunk",
 		}
 
-		msg, err := models.FormatSSEMessage(response)
+		msg, err := models.FormatSSEMessage(chunkResponse)
 		if err != nil {
 			return err
 		}
@@ -224,32 +237,35 @@ func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 
 	// Send completion signal
 	finalResponse := models.Response{
-		Message:   "[DONE]",
-		Content:   "[DONE]",
-		Type:      "done",
-		Timestamp: time.Now().Format(time.RFC3339),
-		UserID:    "user_id",
-		Model:     "llama3.2",
+		Type:      "end",
+		Timestamp: time.Now().Format(time.RFC3339), // Optional: can include final timestamp
 	}
 
-	msg, _ := models.FormatSSEMessage(finalResponse)
+	msg, _ = models.FormatSSEMessage(finalResponse)
 	fmt.Fprint(w, msg)
 	flusher.Flush()
 
 	streamTime := time.Since(startTime)
-	log.Printf("🦙 Client %d: Streamed %d chunks in %.2fs", clientID, chunkCount, streamTime.Seconds())
+	log.Printf("🦙 Client %d: Streamed %d chunks in %.2fs (New Format)", clientID, chunkCount, streamTime.Seconds())
 
 	return nil
 }
 
 // sendImmediateResponse sends a non-streaming response
 func sendImmediateResponse(w http.ResponseWriter, flusher http.Flusher, message string, clientID int) {
-	response := models.GenerateResponse(clientID, "user_id", message)
-	response.Timestamp = time.Now().Format(time.RFC3339)
+	// For non-streaming, we can send a single event with all data.
+	// The client can differentiate based on the "type".
+	response := models.Response{
+		Message:   message, // This would be the full response from the non-streaming model
+		Type:      "full_response",
+		Timestamp: time.Now().Format(time.RFC3339),
+		UserID:    "user_id",             // Replace with actual user ID
+		Model:     "non_streaming_model", // Indicate the model used
+	}
 
 	msg, err := models.FormatSSEMessage(response)
 	if err != nil {
-		log.Printf("❌ Client %d: Error formatting response: %v", clientID, err)
+		log.Printf("❌ Client %d: Error formatting immediate response: %v", clientID, err)
 		return
 	}
 
@@ -261,16 +277,15 @@ func sendImmediateResponse(w http.ResponseWriter, flusher http.Flusher, message 
 func sendErrorResponse(w http.ResponseWriter, flusher http.Flusher, errorMsg string, clientID int) {
 	errorResponse := models.Response{
 		Message:   fmt.Sprintf("Error: %s", errorMsg),
-		Content:   fmt.Sprintf("Error: %s", errorMsg),
 		Type:      "error",
 		Timestamp: time.Now().Format(time.RFC3339),
-		UserID:    "user_id",
-		Model:     "error",
+		// UserID and Model are omitted for error messages in the new format
 	}
 
 	msg, err := models.FormatSSEMessage(errorResponse)
 	if err != nil {
 		log.Printf("❌ Client %d: Error formatting error response: %v", clientID, err)
+		// Fallback to plain HTTP error if SSE formatting fails
 		http.Error(w, errorMsg, http.StatusInternalServerError)
 		return
 	}
