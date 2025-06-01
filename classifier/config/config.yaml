@@ -21,14 +21,35 @@ categories:
   - research
   - extraction
 
+# Dynamic weights based on task importance:
+# Critical tasks (math, coding, reasoning): quality=0.9, cost=0.1
+# Medium tasks (translation, writing): quality=0.6, cost=0.4  
+# Casual tasks (conversation, roleplay): quality=0.2, cost=0.8
 weights:
-  quality: 0.7
-  cost: 0.3
+  quality: 0.7  # Default fallback (not used with dynamic weighting)
+  cost: 0.3     # Default fallback (not used with dynamic weighting)
 
 model_scores:
   models:
     llama3.2:
-      cost_per_request: 0.03
+      cost_per_request: 0.001
+      conversation: 0.88
+      classification: 0.85
+      roleplay: 0.87
+      data_analysis: 0.83
+      translation: 0.89
+      problem_solving: 0.86
+      reasoning: 0.87
+      code_generation: 0.88
+      writing: 0.86
+      summarization: 0.87
+      math: 0.85
+      creative: 0.86
+      research: 0.84
+      extraction: 0.85
+      
+    gemini-2.0-flash:
+      cost_per_request: 0.01
       conversation: 0.95
       classification: 0.90
       roleplay: 0.95
@@ -43,23 +64,6 @@ model_scores:
       creative: 0.92
       research: 0.93
       extraction: 0.90
-
-    gpt4:
-      cost_per_request: 0.01
-      conversation: 0.85
-      classification: 0.82
-      roleplay: 0.84
-      data_analysis: 0.80
-      translation: 0.82
-      problem_solving: 0.83
-      reasoning: 0.84
-      code_generation: 0.85
-      writing: 0.83
-      summarization: 0.84
-      math: 0.82
-      creative: 0.83
-      research: 0.81
-      extraction: 0.82
 
 server:
   host: "0.0.0.0"

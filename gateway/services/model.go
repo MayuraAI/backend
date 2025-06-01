@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"gateway/pkg/logger"
 	"net/http"
 	"os"
 	"sync"
@@ -213,9 +213,14 @@ func CallModelService(prompt string) (ModelResponse, error) {
 
 // logModelResponse logs the model response details in a formatted way
 func logModelResponse(resp ModelResponse, requestTime time.Duration) {
-	log.Printf("🧠 Model Service Response (%.2fms):", requestTime.Seconds()*1000)
-	log.Printf("   Selected: %s (%.1f%% confidence)", resp.Metadata.SelectedModel, resp.Metadata.Confidence*100)
-	log.Printf("   Category: %s (%.2fms processing)", resp.Metadata.PredictedCategory, resp.Metadata.ProcessingTime*1000)
+	log := logger.GetLogger("model.service")
+	log.InfoWithFields("Model service response", map[string]interface{}{
+		"selected_model":     resp.Metadata.SelectedModel,
+		"confidence":         resp.Metadata.Confidence,
+		"predicted_category": resp.Metadata.PredictedCategory,
+		"processing_time_ms": resp.Metadata.ProcessingTime * 1000,
+		"request_time_ms":    requestTime.Milliseconds(),
+	})
 }
 
 // GetCircuitBreakerStats returns circuit breaker statistics for monitoring

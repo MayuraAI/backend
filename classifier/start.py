@@ -2,7 +2,6 @@
 import yaml
 import os
 import sys
-import logging
 import argparse
 from pathlib import Path
 
@@ -13,22 +12,23 @@ if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
 from classifier.router.prompt_router import PromptRouter
+from classifier.router.logging_config import setup_logging, get_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Setup structured logging
+setup_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    log_format=os.getenv("LOG_FORMAT", "structured")
 )
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def initialize_models(train: bool = False):
     """Initialize and validate models before server start."""
     try:
-        logger.info("Initializing router and loading models...")
+        logger.info("Initializing router and loading models")
         router = PromptRouter()
         
         if train:
-            logger.info("Training mode enabled - forcing model training...")
+            logger.info("Training mode enabled - forcing model training")
             router.classifier._load_or_train_models(force_train=True)
         
         # Validate model initialization
@@ -36,19 +36,28 @@ def initialize_models(train: bool = False):
             raise RuntimeError("Embedding model failed to initialize")
         
         # Test model with a sample prompt to ensure everything is loaded
-        logger.info("Testing model initialization...")
+        logger.info("Testing model initialization")
         try:
             test_prompt = "This is a test prompt"
             category, probs = router.classifier.predict(test_prompt)
-            logger.info(f"Test prediction successful - predicted category: {category}")
+            logger.info("Test prediction successful", extra_fields={
+                'predicted_category': category,
+                'operation': 'model_initialization_test'
+            })
             return True
         except Exception as e:
-            logger.error(f"Error during test prediction: {e}")
+            logger.error("Error during test prediction", extra_fields={
+                'operation': 'model_initialization_test',
+                'error_type': type(e).__name__
+            })
             return False
         
         return True
     except Exception as e:
-        logger.error(f"Failed to initialize models: {e}")
+        logger.error("Failed to initialize models", extra_fields={
+            'operation': 'model_initialization',
+            'error_type': type(e).__name__
+        })
         return False
 
 def start_server():
@@ -63,7 +72,7 @@ def start_server():
         with open("classifier/config/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
     except Exception as e:
-        logger.error(f"Error loading config: {e}")
+        logger.error("Error loading config", extra_fields={'error_type': type(e).__name__})
         sys.exit(1)
 
     # Initialize models first
@@ -71,7 +80,7 @@ def start_server():
         logger.error("Model initialization failed, not starting server")
         sys.exit(1)
     
-    logger.info("Models initialized successfully, starting server...")
+    logger.info("Models initialized successfully, starting server")
 
     # Get server config
     server_config = config.get('server', {})
@@ -110,7 +119,11 @@ def start_server():
     ])
 
     # Execute gunicorn
-    logger.info(f"Starting server with command: {' '.join(cmd)}")
+    logger.info("Starting server with gunicorn", extra_fields={
+        'workers': server_config.get('workers', 8),
+        'host': server_config.get('host', '0.0.0.0'),
+        'port': server_config.get('port', 8000)
+    })
     os.execvp("gunicorn", cmd)
 
 if __name__ == "__main__":
