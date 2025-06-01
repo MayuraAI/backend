@@ -1,7 +1,6 @@
 """
 Prompt classifier using sentence transformers for embeddings.
 """
-import logging
 import numpy as np
 import json
 from pathlib import Path
@@ -17,12 +16,9 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from classifier.router.logging_config import get_logger, log_performance
+
+logger = get_logger(__name__)
 
 # Global model instance for sharing across workers
 _model_instance = None
@@ -43,7 +39,7 @@ class PromptClassifier:
         if getattr(self, '_initialized', False):
             return
             
-        logger.info("Initializing model...")
+        logger.info("Initializing model")
         self.config = self._load_config(config_path)
         
         # Initialize models
@@ -66,7 +62,7 @@ class PromptClassifier:
     def _init_embedding_model(self):
         """Initialize the sentence transformer model."""
         model_name = self.config['model']['name']
-        logger.info(f"Loading embedding model '{model_name}'")
+        logger.info("Loading embedding model", extra_fields={'model_name': model_name})
         self.embedding_model = SentenceTransformer(model_name, device="cpu")
 
     def _get_embeddings(self, texts: List[str]) -> np.ndarray:
@@ -85,9 +81,9 @@ class PromptClassifier:
                 logger.info("Successfully loaded pre-trained models")
                 return
             except (FileNotFoundError, ValueError) as e:
-                logger.warning(f"Could not load pre-trained models: {e}")
+                logger.warning("Could not load pre-trained models", extra_fields={'error_type': type(e).__name__})
         
-        logger.info("Training new models...")
+        logger.info("Training new models")
         self._train_from_data()
 
     def _load_models(self, centroids_path: Path, classifier_path: Path):
@@ -107,14 +103,14 @@ class PromptClassifier:
         if not data_path.exists():
             raise FileNotFoundError("Training data file not found at data/data.json")
         
-        logger.info("Loading training data...")
+        logger.info("Loading training data")
         with open(data_path, 'r') as f:
             data = json.load(f)
         
         texts = [item["Prompt"] for item in data]
         labels = [item["Category"] for item in data]
         
-        logger.info(f"Training on {len(texts)} examples...")
+        logger.info("Training on examples", extra_fields={'example_count': len(texts)})
         self.train(texts, labels)
 
     def train(self, texts: List[str], labels: List[str]):
@@ -124,7 +120,7 @@ class PromptClassifier:
             return
 
         # Get embeddings
-        logger.info("Generating embeddings...")
+        logger.info("Generating embeddings")
         embeddings = self._get_embeddings(texts)
         
         # Train label encoder
@@ -134,14 +130,14 @@ class PromptClassifier:
         encoded_labels = self.label_encoder.fit_transform(labels)
         
         # Train classifier
-        logger.info("Training classifier...")
+        logger.info("Training classifier")
         if not self.classifier:
             self.classifier = LogisticRegression(multi_class='ovr', max_iter=1000)
         
         self.classifier.fit(embeddings, encoded_labels)
         
         # Calculate centroids
-        logger.info("Calculating centroids...")
+        logger.info("Calculating centroids")
         unique_labels = self.label_encoder.classes_
         for label in unique_labels:
             mask = np.array(labels) == label
@@ -166,8 +162,9 @@ class PromptClassifier:
         }
         dump(models, str(save_dir / "classifier.joblib"))
         
-        logger.info(f"Models saved to {save_dir}")
+        logger.info("Models saved", extra_fields={'save_dir': str(save_dir)})
 
+    @log_performance("predict", 20.0)
     def predict(self, text: str) -> Tuple[str, Dict[str, float]]:
         """
         Predict category for input text.
