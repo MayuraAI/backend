@@ -27,13 +27,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
-
-# Create necessary directories
-RUN mkdir -p classifier/models
+COPY ./ /app/
 
 # Expose port (default, actual port will be from config)
 EXPOSE 8000
 
-# Set default command to use Gunicorn with Uvicorn workers
-CMD gunicorn classifier.router.main:app --workers $WORKERS --worker-class uvicorn.workers.UvicornWorker --threads $THREADS --bind 0.0.0.0:8000 
+# Start the server
+CMD ["gunicorn", "router.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "2", "--timeout", "120", "--keep-alive", "10", "--max-requests", "1000", "--max-requests-jitter", "50", "--worker-connections", "1000", "--backlog", "2048", "--log-level", "info", "--preload"] 

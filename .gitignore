@@ -2,3 +2,4 @@ __pycache__/
 .env
 .pre-commit-config.yaml
 trufflehog/
+**/best_model/

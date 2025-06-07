@@ -11,13 +11,13 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-from classifier.router.model import PromptClassifier
-from classifier.router.logging_config import get_logger, log_performance
+from router.model import PromptClassifier
+from router.logging_config import get_logger, log_performance
 
 logger = get_logger(__name__)
 
 class PromptRouter:
-    def __init__(self, config_path: str = "classifier/config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the prompt router."""
         self.classifier = PromptClassifier(config_path)
         self.config_path = Path(config_path)

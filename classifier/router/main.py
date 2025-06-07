@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
 
-from classifier.router.prompt_router import PromptRouter
-from classifier.router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
+from router.prompt_router import PromptRouter
+from router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
 
 # Setup structured logging
 setup_logging()
@@ -85,15 +85,8 @@ class PromptResponse(BaseModel):
 @app.get("/health")
 @with_request_id
 async def health_check():
-    """Health check endpoint."""
-    try:
-        # Test the router with a simple prompt
-        router.route_prompt("test prompt")
-        logger.info("Health check passed")
-        return {"status": "healthy"}
-    except Exception as e:
-        logger.error("Health check failed", extra_fields={'error_type': type(e).__name__})
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("Health check requested")
+    return {"status": "healthy"}
 
 @app.post("/complete", response_model=PromptResponse)
 @with_request_id
