@@ -97,7 +97,7 @@ def main():
     print(f"Using device: {device}")
     
     # Load data
-    texts, labels, category_to_id, id_to_category = load_data('../classifier/data/data.json')
+    texts, labels, category_to_id, id_to_category = load_data('../data/data.json')
     print(f"Number of categories: {len(category_to_id)}")
     print("Categories:", category_to_id)
     

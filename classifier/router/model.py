@@ -14,7 +14,7 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-from classifier.router.logging_config import get_logger, log_performance
+from router.logging_config import get_logger, log_performance
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,7 @@ MAX_MODEL_INSTANCES = 2
 _model_instances = []
 
 class PromptClassifier:
-    def __new__(cls, config_path: str = "classifier/config/config.yaml"):
+    def __new__(cls, config_path: str = "config/config.yaml"):
         """Round-robin pattern for multiple model instances."""
         global _model_instances
         if not _model_instances:
@@ -38,7 +38,7 @@ class PromptClassifier:
         cls._current_instance = (getattr(cls, '_current_instance', -1) + 1) % MAX_MODEL_INSTANCES
         return _model_instances[cls._current_instance]
 
-    def __init__(self, config_path: str = "classifier/config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the classifier with config."""
         # Skip initialization if already done
         if getattr(self, '_initialized', False):

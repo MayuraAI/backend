@@ -12,7 +12,7 @@ class PromptClassifier:
         self.model.eval()
         
         # Load category mapping
-        with open('../classifier/data/data.json', 'r') as f:
+        with open('../data/data.json', 'r') as f:
             data = json.load(f)
         categories = sorted(list(set(item['Category'] for item in data)))
         self.id_to_category = {idx: cat for idx, cat in enumerate(categories)}
