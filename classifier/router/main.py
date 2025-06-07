@@ -85,15 +85,8 @@ class PromptResponse(BaseModel):
 @app.get("/health")
 @with_request_id
 async def health_check():
-    """Health check endpoint."""
-    try:
-        # Test the router with a simple prompt
-        router.route_prompt("test prompt")
-        logger.info("Health check passed")
-        return {"status": "healthy"}
-    except Exception as e:
-        logger.error("Health check failed", extra_fields={'error_type': type(e).__name__})
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("Health check requested")
+    return {"status": "healthy"}
 
 @app.post("/complete", response_model=PromptResponse)
 @with_request_id

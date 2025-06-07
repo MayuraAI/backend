@@ -14,7 +14,6 @@ import (
 
 	"gateway/handlers"
 	"gateway/pkg/logger"
-	"gateway/services"
 
 	// "gateway/middleware"
 
@@ -128,31 +127,6 @@ func main() {
 		"metrics":  port + "/metrics",
 		"complete": port + "/complete",
 	})
-
-	// Warmup services for better performance
-	go func() {
-		warmupLogger := logger.GetLogger("warmup")
-		warmupLogger.Info("Starting service warmup")
-
-		// Warmup Ollama model
-		if err := services.WarmupOllamaModel("llama3.2"); err != nil {
-			warmupLogger.Error("Ollama warmup failed", err)
-		}
-
-		// Warmup Gemini model
-		if err := services.WarmupGeminiModel(""); err != nil {
-			warmupLogger.Error("Gemini warmup failed", err)
-		}
-
-		// Test classifier service
-		if _, err := services.CallModelService("Hello world"); err != nil {
-			warmupLogger.Error("Classifier warmup failed", err)
-		} else {
-			warmupLogger.Info("Classifier service warmed up")
-		}
-
-		warmupLogger.Info("Service warmup completed")
-	}()
 
 	// Graceful shutdown
 	go func() {

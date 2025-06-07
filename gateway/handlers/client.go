@@ -101,12 +101,12 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit message length
-	if len(reqBody.Message) > 10000 {
-		sendErrorResponse(w, flusher, "Message too long (max 10,000 characters)", clientID)
-		atomic.AddInt64(&totalErrors, 1)
-		return
-	}
+	// // Limit message length
+	// if len(reqBody.Message) > 10000 {
+	// 	sendErrorResponse(w, flusher, "Message too long (max 10,000 characters)", clientID)
+	// 	atomic.AddInt64(&totalErrors, 1)
+	// 	return
+	// }
 
 	log.InfoWithFieldsCtx(ctx, "Client connected, processing request", map[string]interface{}{
 		"client_id":          clientID,

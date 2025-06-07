@@ -6,15 +6,12 @@ import (
 	"time"
 
 	"gateway/pkg/logger"
-	"gateway/services"
 )
 
 type HealthResponse struct {
-	Status       string                   `json:"status"`
-	Timestamp    time.Time                `json:"timestamp"`
-	Service      string                   `json:"service"`
-	Version      string                   `json:"version"`
-	Dependencies map[string]ServiceHealth `json:"dependencies,omitempty"`
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+	Service   string    `json:"service"`
 }
 
 type ServiceHealth struct {
@@ -33,70 +30,14 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("Health check requested")
 
-	// Check dependency health
-	dependencies := make(map[string]ServiceHealth)
-	overallStatus := "healthy"
-
-	// Check Ollama service
-	if err := services.GetOllamaHealth(); err != nil {
-		dependencies["ollama"] = ServiceHealth{
-			Status:  "unhealthy",
-			Message: err.Error(),
-		}
-		overallStatus = "degraded"
-	} else {
-		dependencies["ollama"] = ServiceHealth{
-			Status: "healthy",
-		}
-	}
-
-	// Check Gemini service
-	if err := services.GetGeminiHealth(); err != nil {
-		dependencies["gemini"] = ServiceHealth{
-			Status:  "unhealthy",
-			Message: err.Error(),
-		}
-		overallStatus = "degraded"
-	} else {
-		dependencies["gemini"] = ServiceHealth{
-			Status: "healthy",
-		}
-	}
-
-	// Check classifier service
-	if _, err := services.CallModelService("health check"); err != nil {
-		dependencies["classifier"] = ServiceHealth{
-			Status:  "unhealthy",
-			Message: err.Error(),
-		}
-		if overallStatus == "healthy" {
-			overallStatus = "degraded"
-		}
-	} else {
-		dependencies["classifier"] = ServiceHealth{
-			Status: "healthy",
-		}
-	}
-
 	response := HealthResponse{
-		Status:       overallStatus,
-		Timestamp:    time.Now(),
-		Service:      "gateway",
-		Version:      "1.0.0",
-		Dependencies: dependencies,
+		Status:    "healthy",
+		Timestamp: time.Now(),
+		Service:   "gateway",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-
-	// Set appropriate status code based on health
-	switch overallStatus {
-	case "healthy":
-		w.WriteHeader(http.StatusOK)
-	case "degraded":
-		w.WriteHeader(http.StatusOK) // Still operational but with issues
-	default:
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}
+	w.WriteHeader(http.StatusOK)
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
