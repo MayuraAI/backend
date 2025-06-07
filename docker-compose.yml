@@ -16,7 +16,6 @@ services:
           cpus: '1'
           memory: 1G
     volumes:
-      - ./model/best_model:/app/models/best_model
       - .:/app
       - /dev/shm:/dev/shm
     environment:

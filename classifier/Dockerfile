@@ -26,9 +26,6 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create necessary directories
-RUN mkdir -p /app/models/best_model
-
 # Copy application code
 COPY . /app/
 

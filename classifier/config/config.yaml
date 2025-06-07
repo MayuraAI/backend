@@ -13,7 +13,7 @@ server:
   preload_app: true
 
 model:
-  save_dir: "/app/models"
+  save_dir: "/app/train"
   instances: 1
   max_length: 512
   batch_size: 32
