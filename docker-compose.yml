@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   classifier:
     build:
@@ -8,12 +10,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
           cpus: '2'
           memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
     volumes:
+      - ./model/best_model:/app/models/best_model
       - .:/app
       - /dev/shm:/dev/shm
     environment:
@@ -29,7 +32,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    restart: unless-stopped
+    restart: always
 
   gateway:
     build:
@@ -41,7 +44,7 @@ services:
       - PORT=8080
       - CLASSIFIER_URL=http://classifier:8000
       - OLLAMA_URL=http://host.docker.internal:11434
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-api-key}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-AIzaSyBsCZnxc5sI7SgKslUjXd5BCH65eZS4CSY}
       - GEMINI_MODEL_NAME=${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
       - GEMINI_API_BASE_URL=${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/models}
       - GOMAXPROCS=2
@@ -61,7 +64,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
+    restart: always
 
 networks:
   backend-network:

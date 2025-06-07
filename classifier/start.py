@@ -79,7 +79,7 @@ def start_server():
     if not initialize_models(train=args.train):
         logger.error("Model initialization failed, not starting server")
         sys.exit(1)
-    
+
     logger.info("Models initialized successfully, starting server")
 
     # Get server config
