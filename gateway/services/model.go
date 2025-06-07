@@ -147,15 +147,15 @@ func (cb *CircuitBreaker) setState(state CircuitState) {
 func CallModelService(prompt string) (ModelResponse, error) {
 	startTime := time.Now()
 
-	// Check circuit breaker
-	if !classifierCircuit.canExecute() {
-		return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
-	}
+	// // Check circuit breaker
+	// if !classifierCircuit.canExecute() {
+	// 	return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
+	// }
 
 	// If circuit breaker is in half-open state, transition it
-	if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
-		classifierCircuit.setState(HalfOpen)
-	}
+	// if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
+	// 	classifierCircuit.setState(HalfOpen)
+	// }
 
 	// Prepare the request
 	reqBody := ModelRequest{
@@ -174,7 +174,7 @@ func CallModelService(prompt string) (ModelResponse, error) {
 	classifierURL := getClassifierURL()
 	req, err := http.NewRequestWithContext(ctx, "POST", classifierURL+"/complete", bytes.NewBuffer(jsonData))
 	if err != nil {
-		classifierCircuit.onFailure()
+		// classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error creating request: %v", err)
 	}
 
@@ -185,25 +185,25 @@ func CallModelService(prompt string) (ModelResponse, error) {
 	// Make the request using optimized client
 	resp, err := classifierClient.Do(req)
 	if err != nil {
-		classifierCircuit.onFailure()
+		// classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error calling model service: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		classifierCircuit.onFailure()
+		// classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("classifier service returned status %d", resp.StatusCode)
 	}
 
 	// Parse the response
 	var modelResp ModelResponse
 	if err := json.NewDecoder(resp.Body).Decode(&modelResp); err != nil {
-		classifierCircuit.onFailure()
+		// classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error decoding response: %v", err)
 	}
 
 	// Success - update circuit breaker
-	classifierCircuit.onSuccess()
+	// classifierCircuit.onSuccess()
 
 	// Log the response details
 	logModelResponse(modelResp, time.Since(startTime))

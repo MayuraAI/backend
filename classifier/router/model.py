@@ -1,14 +1,12 @@
 """
-Prompt classifier using sentence transformers for embeddings.
+Prompt classifier using fine-tuned transformer model.
 """
-import numpy as np
-import json
+import torch
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import yaml
-from sentence_transformers import SentenceTransformer
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import LabelEncoder
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import numpy as np
 import sys
 
 current_dir = Path(__file__).resolve().parent
@@ -16,41 +14,41 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-from classifier.router.logging_config import get_logger, log_performance
+from router.logging_config import get_logger, log_performance
 
 logger = get_logger(__name__)
 
-# Global model instance for sharing across workers
-_model_instance = None
+# Global model instances for sharing across workers
+# Can be modified via config
+MAX_MODEL_INSTANCES = 2
+_model_instances = []
 
 class PromptClassifier:
-    def __new__(cls, config_path: str = "classifier/config/config.yaml"):
-        """Singleton pattern to ensure only one model instance is created."""
-        global _model_instance
-        if _model_instance is None:
-            logger.info("Creating new model instance")
-            _model_instance = super(PromptClassifier, cls).__new__(cls)
-            _model_instance._initialized = False
-        return _model_instance
+    def __new__(cls, config_path: str = "config/config.yaml"):
+        """Round-robin pattern for multiple model instances."""
+        global _model_instances
+        if not _model_instances:
+            logger.info(f"Creating {MAX_MODEL_INSTANCES} model instances")
+            for _ in range(MAX_MODEL_INSTANCES):
+                instance = super(PromptClassifier, cls).__new__(cls)
+                instance._initialized = False
+                _model_instances.append(instance)
+        
+        # Round-robin selection of model instance
+        cls._current_instance = (getattr(cls, '_current_instance', -1) + 1) % MAX_MODEL_INSTANCES
+        return _model_instances[cls._current_instance]
 
-    def __init__(self, config_path: str = "classifier/config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the classifier with config."""
         # Skip initialization if already done
         if getattr(self, '_initialized', False):
             return
             
-        logger.info("Initializing model")
+        logger.info("Initializing model instance")
         self.config = self._load_config(config_path)
         
-        # Initialize models
-        self._init_embedding_model()
-        self.centroids: Dict[str, np.ndarray] = {}
-        self.classifier: Optional[LogisticRegression] = None
-        self.label_encoder: Optional[LabelEncoder] = None
-        
-        # Load or train models
-        self._load_or_train_models()
-        
+        # Initialize model and tokenizer
+        self._init_model()
         self._initialized = True
         logger.info("Model initialization complete")
 
@@ -59,110 +57,33 @@ class PromptClassifier:
         with open(config_path, 'r') as f:
             return yaml.safe_load(f)
 
-    def _init_embedding_model(self):
-        """Initialize the sentence transformer model."""
-        model_name = self.config['model']['name']
-        logger.info("Loading embedding model", extra_fields={'model_name': model_name})
-        self.embedding_model = SentenceTransformer(model_name, device="cpu")
-
-    def _get_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Get embeddings for input texts using sentence transformers."""
-        return self.embedding_model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-
-    def _load_or_train_models(self, force_train: bool = False):
-        """Load pre-trained models or train new ones."""
-        save_dir = Path(self.config['model']['save_dir'])
-        centroids_path = save_dir / "centroids.npy"
-        classifier_path = save_dir / "classifier.joblib"
+    def _init_model(self):
         
-        if not force_train:
-            try:
-                self._load_models(centroids_path, classifier_path)
-                logger.info("Successfully loaded pre-trained models")
-                return
-            except (FileNotFoundError, ValueError) as e:
-                logger.warning("Could not load pre-trained models", extra_fields={'error_type': type(e).__name__})
+        model_path = Path(self.config['model']['save_dir']) / "best_model"
         
-        logger.info("Training new models")
-        self._train_from_data()
-
-    def _load_models(self, centroids_path: Path, classifier_path: Path):
-        """Load pre-trained models from disk."""
-        if centroids_path.exists():
-            self.centroids = np.load(str(centroids_path), allow_pickle=True).item()
+        if not model_path.exists():
+            raise ValueError(f"Model not found at {model_path}. Please train the model first.")
         
-        if classifier_path.exists():
-            from joblib import load
-            models = load(classifier_path)
-            self.classifier = models['classifier']
-            self.label_encoder = models['label_encoder']
-
-    def _train_from_data(self):
-        """Train models using data from data.json."""
-        data_path = Path("classifier/data/data.json")
-        if not data_path.exists():
-            raise FileNotFoundError("Training data file not found at data/data.json")
+        logger.info("Loading model and tokenizer", extra_fields={'model_path': str(model_path)})
         
-        logger.info("Loading training data")
-        with open(data_path, 'r') as f:
-            data = json.load(f)
+        # Load tokenizer and model
+        self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+        self.model = AutoModelForSequenceClassification.from_pretrained(str(model_path))
         
-        texts = [item["Prompt"] for item in data]
-        labels = [item["Category"] for item in data]
+        # Move model to appropriate device
+        self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+        self.model.to(self.device)
+        self.model.eval()
         
-        logger.info("Training on examples", extra_fields={'example_count': len(texts)})
-        self.train(texts, labels)
-
-    def train(self, texts: List[str], labels: List[str]):
-        """Train the classifier on new data."""
-        if not texts or not labels:
-            logger.warning("No training data provided")
-            return
-
-        # Get embeddings
-        logger.info("Generating embeddings")
-        embeddings = self._get_embeddings(texts)
+        # Load label mapping from model config
+        config = self.model.config
+        self.id_to_label = config.id2label
+        self.label_mapping = {v: int(k) for k, v in config.id2label.items()}
         
-        # Train label encoder
-        if not self.label_encoder:
-            self.label_encoder = LabelEncoder()
-        
-        encoded_labels = self.label_encoder.fit_transform(labels)
-        
-        # Train classifier
-        logger.info("Training classifier")
-        if not self.classifier:
-            self.classifier = LogisticRegression(multi_class='ovr', max_iter=1000)
-        
-        self.classifier.fit(embeddings, encoded_labels)
-        
-        # Calculate centroids
-        logger.info("Calculating centroids")
-        unique_labels = self.label_encoder.classes_
-        for label in unique_labels:
-            mask = np.array(labels) == label
-            label_embeddings = embeddings[mask]
-            self.centroids[label] = np.mean(label_embeddings, axis=0)
-        
-        self._save_models()
-
-    def _save_models(self):
-        """Save trained models to disk."""
-        save_dir = Path(self.config['model']['save_dir'])
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save centroids
-        np.save(str(save_dir / "centroids.npy"), self.centroids)
-        
-        # Save classifier and label encoder
-        from joblib import dump
-        models = {
-            'classifier': self.classifier,
-            'label_encoder': self.label_encoder
-        }
-        dump(models, str(save_dir / "classifier.joblib"))
-        
-        logger.info("Models saved", extra_fields={'save_dir': str(save_dir)})
+        logger.info("Model initialization complete", extra_fields={
+            'device': str(self.device),
+            'num_labels': len(self.label_mapping)
+        })
 
     @log_performance("predict", 20.0)
     def predict(self, text: str) -> Tuple[str, Dict[str, float]]:
@@ -172,26 +93,35 @@ class PromptClassifier:
         Returns:
             Tuple of (predicted_category, probability_dict)
         """
-        if not self.classifier:
-            raise ValueError("Models not initialized. Please train the classifier first.")
+        # Tokenize input
+        inputs = self.tokenizer(
+            text,
+            truncation=True,
+            padding=True,
+            max_length=512,
+            return_tensors="pt"
+        )
         
-        if not self.label_encoder:
-            raise ValueError("Label encoder not initialized. Please get the encoder first.")
-            
-        # Get embedding
-        embedding = self._get_embeddings([text])[0]
+        # Move inputs to device
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        # Get probabilities
-        probs = self.classifier.predict_proba([embedding])[0]
+        # Get predictions
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+        
+        # Convert to numpy for easier handling
+        probs = probs[0].cpu().numpy()
         
         # Create probability dictionary
         prob_dict = {
-            cat: float(prob)
-            for cat, prob in zip(self.label_encoder.classes_, probs)
+            self.id_to_label[i]: float(p)
+            for i, p in enumerate(probs)
         }
         
         # Get prediction
         predicted_idx = probs.argmax()
-        predicted_category = self.label_encoder.classes_[predicted_idx]
+        predicted_category = self.id_to_label[predicted_idx]
         
         return predicted_category, prob_dict

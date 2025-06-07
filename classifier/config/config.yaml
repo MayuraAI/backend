@@ -1,33 +1,31 @@
-model:
-  name: "sentence-transformers/all-MiniLM-L6-v2"
-  save_dir: "classifier/models"
-  embedding_dim: 768
-  cache_embeddings: true
-  max_cache_size: 10000
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  threads: 4
+  timeout: 120
+  keep_alive: 10
+  max_requests: 1000
+  max_requests_jitter: 50
+  worker_connections: 1000
+  backlog: 2048
+  log_level: "INFO"
+  preload_app: true
 
-categories:
-  - conversation
-  - classification
-  - roleplay
-  - data_analysis
-  - translation
-  - problem_solving
-  - reasoning
-  - code_generation
-  - writing
-  - summarization
-  - math
-  - creative
-  - research
-  - extraction
+model:
+  save_dir: "/app/train"
+  instances: 1
+  max_length: 512
+  batch_size: 32
+  name: "distilbert-base-uncased"
 
 # Dynamic weights based on task importance:
 # Critical tasks (math, coding, reasoning): quality=0.9, cost=0.1
 # Medium tasks (translation, writing): quality=0.6, cost=0.4  
 # Casual tasks (conversation, roleplay): quality=0.2, cost=0.8
 weights:
-  quality: 0.7  # Default fallback (not used with dynamic weighting)
-  cost: 0.3     # Default fallback (not used with dynamic weighting)
+  quality: 0.7
+  cost: 0.3
 
 model_scores:
   models:
@@ -64,17 +62,3 @@ model_scores:
       creative: 0.92
       research: 0.93
       extraction: 0.90
-
-server:
-  host: "0.0.0.0"
-  port: 8000
-  workers: 8
-  threads: 4
-  log_level: "INFO"
-  timeout: 120
-  keep_alive: 10
-  max_requests: 1000
-  max_requests_jitter: 50
-  preload_app: true
-  worker_connections: 1000
-  backlog: 2048 
