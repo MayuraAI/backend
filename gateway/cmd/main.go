@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"gateway/handlers"
+	"gateway/pkg/logger"
 	"gateway/services"
 
 	// "gateway/middleware"
@@ -24,10 +24,14 @@ import (
 func main() {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
+	// Initialize logging
+	logger.InitFromEnv()
+	log := logger.GetLogger("main")
+
 	// Get JWT secret from environment variable
 	err := godotenv.Load()
 	if err != nil {
-		log.Printf("Warning: Error loading .env file: %v", err)
+		log.Warn("Error loading .env file")
 	}
 	// supabaseJWTSecret := os.Getenv("SUPABASE_JWT_SECRET")
 	// if supabaseJWTSecret == "" {
@@ -109,56 +113,71 @@ func main() {
 		ForceAttemptHTTP2:  true,
 	}
 
-	log.Printf("🚀 Optimized Gateway server starting on %s", port)
-	log.Printf("📊 Performance optimizations enabled:")
-	log.Printf("   - Connection pooling: %d max connections", 100)
-	log.Printf("   - Keep-alive timeout: %v", server.IdleTimeout)
-	log.Printf("   - Streaming optimized (no write timeout)")
-	log.Printf("   - HTTP/2 enabled")
-	log.Printf("🔗 Endpoints:")
-	log.Printf("   - Health: %s/health", port)
-	log.Printf("   - Metrics: %s/metrics", port)
-	log.Printf("   - Complete: %s/complete", port)
+	log.InfoWithFields("Gateway server starting", map[string]interface{}{
+		"port":          port,
+		"optimizations": "enabled",
+	})
+	log.InfoWithFields("Performance optimizations enabled", map[string]interface{}{
+		"max_connections":    100,
+		"keep_alive_timeout": server.IdleTimeout.String(),
+		"streaming":          "optimized",
+		"http2":              "enabled",
+	})
+	log.InfoWithFields("Endpoints configured", map[string]interface{}{
+		"health":   port + "/health",
+		"metrics":  port + "/metrics",
+		"complete": port + "/complete",
+	})
 
 	// Warmup services for better performance
 	go func() {
-		log.Println("🔥 Starting service warmup...")
+		warmupLogger := logger.GetLogger("warmup")
+		warmupLogger.Info("Starting service warmup")
 
 		// Warmup Ollama model
 		if err := services.WarmupOllamaModel("llama3.2"); err != nil {
-			log.Printf("⚠️  Ollama warmup failed: %v", err)
+			warmupLogger.Error("Ollama warmup failed", err)
+		}
+
+		// Warmup Gemini model
+		if err := services.WarmupGeminiModel(""); err != nil {
+			warmupLogger.Error("Gemini warmup failed", err)
 		}
 
 		// Test classifier service
 		if _, err := services.CallModelService("Hello world"); err != nil {
-			log.Printf("⚠️  Classifier warmup failed: %v", err)
+			warmupLogger.Error("Classifier warmup failed", err)
 		} else {
-			log.Println("✅ Classifier service warmed up")
+			warmupLogger.Info("Classifier service warmed up")
 		}
 
-		log.Println("🚀 Service warmup completed")
+		warmupLogger.Info("Service warmup completed")
 	}()
 
 	// Graceful shutdown
 	go func() {
+		shutdownLogger := logger.GetLogger("shutdown")
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 
-		log.Println("🛑 Shutting down server gracefully...")
+		shutdownLogger.Info("Shutting down server gracefully")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("❌ Server shutdown error: %v", err)
+			shutdownLogger.Error("Server shutdown error", err)
 		} else {
-			log.Println("✅ Server shutdown complete")
+			shutdownLogger.Info("Server shutdown complete")
 		}
 	}()
 
 	// Start server
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("❌ Server failed to start: %v", err)
+		log.ErrorWithFields("Server failed to start", map[string]interface{}{
+			"error": err.Error(),
+		}, err)
+		os.Exit(1)
 	}
 }

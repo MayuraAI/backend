@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gateway/pkg/logger"
 	"io"
 	"net/http"
 	"os"
@@ -180,13 +181,15 @@ func StreamOllamaResponse(model, prompt string, onChunk func(string) error) erro
 func logStreamingMetrics(model string, chunks int, timeToFirst, totalTime time.Duration) {
 	avgChunkTime := float64(totalTime.Milliseconds()) / float64(chunks)
 
-	fmt.Printf("🦙 Ollama Streaming Metrics:\n")
-	fmt.Printf("   Model: %s\n", model)
-	fmt.Printf("   Chunks: %d\n", chunks)
-	fmt.Printf("   Time to first chunk: %.2fms\n", timeToFirst.Seconds()*1000)
-	fmt.Printf("   Total time: %.2fs\n", totalTime.Seconds())
-	fmt.Printf("   Avg time per chunk: %.2fms\n", avgChunkTime)
-	fmt.Printf("   Throughput: %.1f chunks/sec\n", float64(chunks)/totalTime.Seconds())
+	log := logger.GetLogger("ollama.metrics")
+	log.InfoWithFields("Ollama streaming metrics", map[string]interface{}{
+		"model":                     model,
+		"chunks":                    chunks,
+		"time_to_first_ms":          timeToFirst.Milliseconds(),
+		"total_time_s":              totalTime.Seconds(),
+		"avg_chunk_time_ms":         avgChunkTime,
+		"throughput_chunks_per_sec": float64(chunks) / totalTime.Seconds(),
+	})
 }
 
 // GetOllamaHealth checks if Ollama service is healthy
@@ -251,7 +254,10 @@ func WarmupOllamaModel(model string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		fmt.Printf("🔥 Model %s warmed up successfully\n", model)
+		log := logger.GetLogger("ollama.warmup")
+		log.InfoWithFields("Ollama model warmed up successfully", map[string]interface{}{
+			"model": model,
+		})
 	}
 
 	return nil

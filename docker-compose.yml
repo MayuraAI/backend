@@ -41,6 +41,9 @@ services:
       - PORT=8080
       - CLASSIFIER_URL=http://classifier:8000
       - OLLAMA_URL=http://host.docker.internal:11434
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-api-key}
+      - GEMINI_MODEL_NAME=${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
+      - GEMINI_API_BASE_URL=${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/models}
       - GOMAXPROCS=2
     deploy:
       resources:

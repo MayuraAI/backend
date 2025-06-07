@@ -1,22 +1,19 @@
 """
 FastAPI server for prompt classification and routing.
 """
-import logging
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
 
 from classifier.router.prompt_router import PromptRouter
+from classifier.router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Setup structured logging
+setup_logging()
+logger = get_logger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -86,23 +83,31 @@ class PromptResponse(BaseModel):
     metadata: Dict[str, Any]
 
 @app.get("/health")
+@with_request_id
 async def health_check():
     """Health check endpoint."""
     try:
         # Test the router with a simple prompt
         router.route_prompt("test prompt")
+        logger.info("Health check passed")
         return {"status": "healthy"}
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("Health check failed", extra_fields={'error_type': type(e).__name__})
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/complete", response_model=PromptResponse)
-async def route_prompt(request: PromptRequest):
+@with_request_id
+async def route_prompt_endpoint(request: PromptRequest):
     """Route a prompt to the most appropriate model."""
     CONCURRENT_REQUESTS.inc()
     
     try:
         with LATENCY_HISTOGRAM.labels('/complete').time():
+            logger.info("Processing prompt routing request", extra_fields={
+                'prompt_length': len(request.prompt),
+                'has_params': request.params is not None
+            })
+            
             # Route the prompt
             model, metadata = await router.route_prompt(request.prompt)
             
@@ -112,13 +117,22 @@ async def route_prompt(request: PromptRequest):
             CONFIDENCE_GAUGE.set(metadata['confidence'])
             REQUEST_COUNT.labels('/complete', 'success').inc()
             
+            logger.info("Prompt routing completed", extra_fields={
+                'selected_model': model,
+                'predicted_category': metadata['predicted_category'],
+                'confidence': metadata['confidence']
+            })
+            
             return PromptResponse(
                 model=model,
                 metadata=metadata
             )
             
     except Exception as e:
-        logger.error(f"Error processing request: {e}")
+        logger.error("Error processing request", extra_fields={
+            'error_type': type(e).__name__,
+            'prompt_length': len(request.prompt) if request.prompt else 0
+        })
         REQUEST_COUNT.labels('/complete', 'error').inc()
         raise HTTPException(status_code=500, detail="Internal server error")
     
