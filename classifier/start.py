@@ -11,8 +11,8 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-from classifier.router.prompt_router import PromptRouter
-from classifier.router.logging_config import setup_logging, get_logger
+from router.prompt_router import PromptRouter
+from router.logging_config import setup_logging, get_logger
 
 # Setup structured logging
 setup_logging(
@@ -69,7 +69,7 @@ def start_server():
 
     # Load config
     try:
-        with open("classifier/config/config.yaml", 'r') as f:
+        with open("config/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
     except Exception as e:
         logger.error("Error loading config", extra_fields={'error_type': type(e).__name__})
@@ -88,7 +88,7 @@ def start_server():
     # Build gunicorn command with config values and improved logging
     cmd = [
         "gunicorn",
-        "classifier.router.main:app",
+        "router.main:app",
         f"--workers={server_config.get('workers', 8)}",
         "--worker-class=uvicorn.workers.UvicornWorker",
         f"--threads={server_config.get('threads', 4)}",

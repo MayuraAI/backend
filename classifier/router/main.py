@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
 
-from classifier.router.prompt_router import PromptRouter
-from classifier.router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
+from router.prompt_router import PromptRouter
+from router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
 
 # Setup structured logging
 setup_logging()
