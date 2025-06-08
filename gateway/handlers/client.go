@@ -18,14 +18,17 @@ import (
 )
 
 type Response struct {
-	Message   string `json:"message"`
+	Prompt    string `json:"prompt"`
 	Timestamp string `json:"timestamp"`
 	UserID    string `json:"user_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 }
 
 type RequestBody struct {
-	Message string `json:"message,omitempty"`
+	Prompt                string               `json:"prompt,omitempty"`
+	PreviousMessages      []models.ChatMessage `json:"previous_messages,omitempty"`
+	ProfileContext        string               `json:"profile_context,omitempty"`
+	WorkspaceInstructions string               `json:"workspace_instructions,omitempty"`
 }
 
 // Global metrics for monitoring
@@ -94,23 +97,22 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate message content
-	if strings.TrimSpace(reqBody.Message) == "" {
-		sendErrorResponse(w, flusher, "Message cannot be empty", clientID)
+	// Get the prompt from either prompt field
+	prompt := reqBody.Prompt
+
+	// Validate prompt content
+	if strings.TrimSpace(prompt) == "" {
+		sendErrorResponse(w, flusher, "Prompt cannot be empty", clientID)
 		atomic.AddInt64(&totalErrors, 1)
 		return
 	}
 
-	// // Limit message length
-	// if len(reqBody.Message) > 10000 {
-	// 	sendErrorResponse(w, flusher, "Message too long (max 10,000 characters)", clientID)
-	// 	atomic.AddInt64(&totalErrors, 1)
-	// 	return
-	// }
-
 	log.InfoWithFieldsCtx(ctx, "Client connected, processing request", map[string]interface{}{
 		"client_id":          clientID,
 		"processing_time_ms": time.Since(startTime).Milliseconds(),
+		"has_previous_msgs":  len(reqBody.PreviousMessages) > 0,
+		"has_profile_ctx":    reqBody.ProfileContext != "",
+		"has_workspace_inst": reqBody.WorkspaceInstructions != "",
 	})
 
 	// Create context with timeout for the entire request
@@ -132,7 +134,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Call the model service with timeout
-	modelResponse, err := callModelServiceWithTimeout(ctx, reqBody.Message)
+	modelResponse, err := callModelServiceWithTimeout(ctx, prompt)
 	if err != nil {
 		log.ErrorWithFieldsCtx(ctx, "Model service error", map[string]interface{}{
 			"client_id": clientID,
@@ -150,8 +152,8 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Handle different models with streaming
 	selectedModel := modelResponse.Metadata.SelectedModel
-	if selectedModel == "llama3.2" {
-		err := streamLlamaResponse(ctx, w, flusher, reqBody.Message, clientID)
+	if selectedModel == "gemma3" {
+		err := streamLlamaResponse(ctx, w, flusher, prompt, clientID, reqBody.PreviousMessages, reqBody.ProfileContext, reqBody.WorkspaceInstructions)
 		if err != nil {
 			log.ErrorWithFieldsCtx(ctx, "Streaming error", map[string]interface{}{
 				"client_id": clientID,
@@ -161,7 +163,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if strings.HasPrefix(selectedModel, "gemini") {
-		err := streamGeminiResponse(ctx, w, flusher, reqBody.Message, selectedModel, clientID)
+		err := streamGeminiResponse(ctx, w, flusher, prompt, selectedModel, clientID, reqBody.PreviousMessages, reqBody.ProfileContext, reqBody.WorkspaceInstructions)
 		if err != nil {
 			log.ErrorWithFieldsCtx(ctx, "Gemini streaming error", map[string]interface{}{
 				"client_id": clientID,
@@ -172,7 +174,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// For other models, send immediate response
-		sendImmediateResponse(w, flusher, reqBody.Message, clientID)
+		sendImmediateResponse(w, flusher, prompt, clientID)
 	}
 
 	totalTime := time.Since(startTime)
@@ -183,7 +185,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // callModelServiceWithTimeout calls the model service with context timeout
-func callModelServiceWithTimeout(ctx context.Context, message string) (services.ModelResponse, error) {
+func callModelServiceWithTimeout(ctx context.Context, prompt string) (services.ModelResponse, error) {
 	// Create a channel to receive the result
 	resultChan := make(chan struct {
 		response services.ModelResponse
@@ -192,7 +194,7 @@ func callModelServiceWithTimeout(ctx context.Context, message string) (services.
 
 	// Call model service in goroutine
 	go func() {
-		response, err := services.CallModelService(message)
+		response, err := services.CallModelService(prompt)
 		resultChan <- struct {
 			response services.ModelResponse
 			err      error
@@ -209,16 +211,16 @@ func callModelServiceWithTimeout(ctx context.Context, message string) (services.
 }
 
 // streamLlamaResponse handles streaming response from Ollama
-func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, message string, clientID int) error {
-	chunkCount := 0
-	startTime := time.Now()
+func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
+	// chunkCount := 0
+	// startTime := time.Now()
 
 	// Send a "start" event with metadata
 	startResponse := models.Response{
 		Type:      "start",
 		Timestamp: time.Now().Format(time.RFC3339),
 		UserID:    "user_id", // Replace with actual user ID if available
-		Model:     "llama3.2",
+		Model:     "gemma3",
 	}
 	msg, err := models.FormatSSEMessage(startResponse)
 	if err != nil {
@@ -231,35 +233,7 @@ func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 	flusher.Flush()
 
 	// Stream response from Ollama with context monitoring
-	err = services.StreamOllamaResponse("llama3.2", message, func(chunk string) error {
-		// Check if client disconnected
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		chunkCount++
-
-		// Send only the new chunk
-		chunkResponse := models.Response{
-			Message: chunk,
-			Type:    "chunk",
-		}
-
-		msg, err := models.FormatSSEMessage(chunkResponse)
-		if err != nil {
-			return err
-		}
-
-		_, err = fmt.Fprint(w, msg)
-		if err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	})
-
+	err = services.StreamOllamaResponse(ctx, w, flusher, prompt, clientID, previousMessages, profileContext, workspaceInstructions)
 	if err != nil {
 		// Check if error is due to context cancellation
 		if ctx.Err() != nil {
@@ -268,31 +242,13 @@ func streamLlamaResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 		return err
 	}
 
-	// Send completion signal
-	finalResponse := models.Response{
-		Type:      "end",
-		Timestamp: time.Now().Format(time.RFC3339), // Optional: can include final timestamp
-	}
-
-	msg, _ = models.FormatSSEMessage(finalResponse)
-	fmt.Fprint(w, msg)
-	flusher.Flush()
-
-	streamTime := time.Since(startTime)
-	streamLogger := logger.GetLogger("stream")
-	streamLogger.InfoWithFieldsCtx(ctx, "Llama streaming completed", map[string]interface{}{
-		"client_id":     clientID,
-		"chunk_count":   chunkCount,
-		"stream_time_s": streamTime.Seconds(),
-	})
-
 	return nil
 }
 
 // streamGeminiResponse handles streaming response from Gemini
-func streamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, message string, model string, clientID int) error {
-	chunkCount := 0
-	startTime := time.Now()
+func streamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
+	// chunkCount := 0
+	// startTime := time.Now()
 
 	// Send a "start" event with metadata
 	startResponse := models.Response{
@@ -312,35 +268,7 @@ func streamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	flusher.Flush()
 
 	// Stream response from Gemini with context monitoring
-	err = services.StreamGeminiResponse(model, message, func(chunk string) error {
-		// Check if client disconnected
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		chunkCount++
-
-		// Send only the new chunk
-		chunkResponse := models.Response{
-			Message: chunk,
-			Type:    "chunk",
-		}
-
-		msg, err := models.FormatSSEMessage(chunkResponse)
-		if err != nil {
-			return err
-		}
-
-		_, err = fmt.Fprint(w, msg)
-		if err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	})
-
+	err = services.StreamGeminiResponse(ctx, w, flusher, prompt, model, clientID, previousMessages, profileContext, workspaceInstructions)
 	if err != nil {
 		// Check if error is due to context cancellation
 		if ctx.Err() != nil {
@@ -348,25 +276,6 @@ func streamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		}
 		return err
 	}
-
-	// Send completion signal
-	finalResponse := models.Response{
-		Type:      "end",
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	msg, _ = models.FormatSSEMessage(finalResponse)
-	fmt.Fprint(w, msg)
-	flusher.Flush()
-
-	streamTime := time.Since(startTime)
-	streamLogger := logger.GetLogger("stream")
-	streamLogger.InfoWithFieldsCtx(ctx, "Gemini streaming completed", map[string]interface{}{
-		"client_id":     clientID,
-		"chunk_count":   chunkCount,
-		"stream_time_s": streamTime.Seconds(),
-		"model":         model,
-	})
 
 	return nil
 }

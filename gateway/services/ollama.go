@@ -6,20 +6,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gateway/models"
 	"gateway/pkg/logger"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 // OllamaRequest represents the request to Ollama API
 type OllamaRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Stream  bool                   `json:"stream"`
-	Options map[string]interface{} `json:"options,omitempty"`
+	Model    string                 `json:"model"`
+	Prompt   string                 `json:"prompt"`
+	Stream   bool                   `json:"stream"`
+	Options  map[string]interface{} `json:"options,omitempty"`
+	System   string                 `json:"system,omitempty"`
+	Template string                 `json:"template,omitempty"`
 }
 
 // OllamaResponse represents the streaming response from Ollama API
@@ -72,36 +76,71 @@ func getOllamaURL() string {
 }
 
 // StreamOllamaResponse calls Ollama API and streams the response with optimizations
-func StreamOllamaResponse(model, prompt string, onChunk func(string) error) error {
+func StreamOllamaResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
 	// Initialize optimized client
 	initOllamaClient()
 
 	startTime := time.Now()
 
-	// Prepare optimized request
-	reqBody := OllamaRequest{
-		Model:  model,
-		Prompt: prompt,
-		Stream: true,
-		Options: map[string]interface{}{
-			"temperature": 0.7,
-			"top_p":       0.9,
-			"top_k":       40,
-			"num_predict": 2048, // Limit response length
-		},
+	// Get the system prompt
+	systemPrompt := models.Config.GetSystemPrompt("gemma3")
+
+	// Format messages for context
+	var contextBuilder strings.Builder
+
+	// Add profile context if available
+	if profileContext != "" {
+		contextBuilder.WriteString("Profile Context:\n" + profileContext + "\n\n")
 	}
 
+	// Add workspace instructions if available
+	if workspaceInstructions != "" {
+		contextBuilder.WriteString("Workspace Instructions:\n" + workspaceInstructions + "\n\n")
+	}
+
+	if len(previousMessages) > 0 {
+		contextBuilder.WriteString("These are the previous messages in the conversation:\n")
+		// Limit to last 4 messages
+		startIdx := 0
+		if len(previousMessages) > 4 {
+			startIdx = len(previousMessages) - 4
+		}
+
+		for _, msg := range previousMessages[startIdx:] {
+			if msg.Role == "user" {
+				contextBuilder.WriteString(fmt.Sprintf("User: %s\n", msg.Content))
+			} else {
+				contextBuilder.WriteString(fmt.Sprintf("Assistant(%s): %s\n", msg.ModelName, msg.Content))
+			}
+		}
+		contextBuilder.WriteString("\nThe next user question is:\n")
+	}
+	contextBuilder.WriteString(prompt)
+
+	contextBuilder.WriteString("\nNow answer the user's question.")
+
+	// Create the request body
+	reqBody := OllamaRequest{
+		Model:  "gemma3:4b",
+		Prompt: contextBuilder.String(),
+		Stream: true,
+		Options: map[string]interface{}{
+			"temperature": 0.8,
+			"top_k":       40,
+			"top_p":       0.95,
+		},
+		System:   systemPrompt,
+		Template: "system: {{ .System }}\n\nuser: {{ .Prompt }}\n\nassistant:",
+	}
+
+	// Prepare optimized request
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return fmt.Errorf("error marshaling request: %v", err)
 	}
 
 	// Create request with context for cancellation
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	ollamaURL := getOllamaURL()
-	req, err := http.NewRequestWithContext(ctx, "POST", ollamaURL+"/api/generate", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", getOllamaURL()+"/api/generate", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
 	}
@@ -120,7 +159,8 @@ func StreamOllamaResponse(model, prompt string, onChunk func(string) error) erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Ollama API returned status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Ollama API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// Stream processing with optimized buffering
@@ -131,41 +171,68 @@ func StreamOllamaResponse(model, prompt string, onChunk func(string) error) erro
 	scanner.Buffer(buf, 64*1024)
 
 	chunkCount := 0
-	firstChunkTime := time.Time{}
+	firstChunkTime := time.Now()
+	var fullResponse strings.Builder
+
+	// Wait for the first chunk to arrive
+	firstChunkReceived := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" {
+		if len(line) == 0 {
 			continue
 		}
 
 		// Parse JSON response
-		var ollamaResp OllamaResponse
-		if err := json.Unmarshal([]byte(line), &ollamaResp); err != nil {
-			// Log error but continue processing
+		var streamResp OllamaResponse
+		if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+			// Log error for debugging
+			log := logger.GetLogger("ollama.stream")
+			log.ErrorWithFields("Failed to unmarshal Ollama response", map[string]interface{}{
+				"error": err.Error(),
+				"line":  line,
+			}, err)
 			continue
 		}
 
 		// Track first chunk timing
-		if chunkCount == 0 {
+		if !firstChunkReceived {
 			firstChunkTime = time.Now()
+			firstChunkReceived = true
 		}
 		chunkCount++
 
+		// Extract the response part
+		chunkText := streamResp.Response
+		if chunkText == "" {
+			continue
+		}
+		fullResponse.WriteString(chunkText)
+
 		// Send chunk to handler
-		if ollamaResp.Response != "" {
-			if err := onChunk(ollamaResp.Response); err != nil {
-				return fmt.Errorf("error processing chunk: %v", err)
-			}
+		chunkResponse := models.Response{
+			Message: chunkText,
+			Type:    "chunk",
 		}
 
+		msg, err := models.FormatSSEMessage(chunkResponse)
+		if err != nil {
+			return fmt.Errorf("error formatting chunk: %v", err)
+		}
+
+		_, err = fmt.Fprint(w, msg)
+		if err != nil {
+			return fmt.Errorf("error sending chunk: %v", err)
+		}
+		flusher.Flush()
+
 		// Check if done
-		if ollamaResp.Done {
+		if streamResp.Done {
 			totalTime := time.Since(startTime)
 			timeToFirst := firstChunkTime.Sub(startTime)
 
 			// Log performance metrics
-			logStreamingMetrics(model, chunkCount, timeToFirst, totalTime)
+			logStreamingMetrics("gemma3", chunkCount, timeToFirst, totalTime)
 			break
 		}
 	}
@@ -173,6 +240,14 @@ func StreamOllamaResponse(model, prompt string, onChunk func(string) error) erro
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading stream: %v", err)
 	}
+
+	streamTime := time.Since(startTime)
+	streamLogger := logger.GetLogger("stream")
+	streamLogger.InfoWithFieldsCtx(ctx, "Llama streaming completed", map[string]interface{}{
+		"client_id":     clientID,
+		"chunk_count":   chunkCount,
+		"stream_time_s": streamTime.Seconds(),
+	})
 
 	return nil
 }
@@ -190,46 +265,4 @@ func logStreamingMetrics(model string, chunks int, timeToFirst, totalTime time.D
 		"avg_chunk_time_ms":         avgChunkTime,
 		"throughput_chunks_per_sec": float64(chunks) / totalTime.Seconds(),
 	})
-}
-
-// CallOllamaAPI calls Ollama API for non-streaming response
-func CallOllamaAPI(model, prompt string) (string, error) {
-	// Prepare the request
-	reqBody := OllamaRequest{
-		Model:  model,
-		Prompt: prompt,
-		Stream: false,
-	}
-
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("error marshaling request: %v", err)
-	}
-
-	// Get Ollama URL from environment
-	ollamaURL := getOllamaURL()
-
-	// Make the request to Ollama API
-	resp, err := http.Post(
-		ollamaURL+"/api/generate",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
-	if err != nil {
-		return "", fmt.Errorf("error calling Ollama API: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Ollama API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse the response
-	var ollamaResp OllamaResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
-		return "", fmt.Errorf("error decoding response: %v", err)
-	}
-
-	return ollamaResp.Response, nil
 }
