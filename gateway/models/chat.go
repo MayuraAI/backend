@@ -15,8 +15,17 @@ type Response struct {
 	Model     string `json:"model,omitempty"`
 }
 
+type ChatMessage struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	ModelName string `json:"model_name,omitempty"`
+}
+
 type RequestBody struct {
-	Message string `json:"message,omitempty"`
+	Prompt                string        `json:"prompt,omitempty"`
+	PreviousMessages      []ChatMessage `json:"previous_messages,omitempty"`
+	ProfileContext        string        `json:"profile_context,omitempty"`
+	WorkspaceInstructions string        `json:"workspace_instructions,omitempty"`
 }
 
 // GenerateResponse creates a new response with the given parameters

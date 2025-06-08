@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gateway/models"
 	"gateway/pkg/logger"
 	"io"
 	"net/http"
@@ -116,11 +117,13 @@ func getGeminiConfig() (apiKey, modelName, baseURL string) {
 }
 
 // StreamGeminiResponse calls Gemini API and streams the response with optimizations
-func StreamGeminiResponse(model, prompt string, onChunk func(string) error) error {
+func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
 	// Initialize optimized client
 	initGeminiClient()
 
 	startTime := time.Now()
+
+	// Get API key and model name from environment
 	apiKey, modelName, baseURL := getGeminiConfig()
 
 	// Use provided model or fall back to default
@@ -128,27 +131,83 @@ func StreamGeminiResponse(model, prompt string, onChunk func(string) error) erro
 		modelName = model
 	}
 
-	// Prepare optimized request
-	reqBody := GeminiRequest{
-		Contents: []GeminiContent{
-			{
+	// Get the system prompt
+	systemPrompt := models.Config.GetSystemPrompt("gemini")
+
+	// Format messages for Gemini
+	contents := []GeminiContent{}
+
+	// Add system prompt as a system message if available
+	// Gemini API does not support a dedicated "system" role, so prepend to the first user message.
+	finalSystemPrompt := systemPrompt
+	if profileContext != "" {
+		finalSystemPrompt += "\n\nUser Profile Context:\n" + profileContext
+	}
+	if workspaceInstructions != "" {
+		finalSystemPrompt += "\n\nWorkspace Instructions:\n" + workspaceInstructions
+	}
+
+	// Add previous messages (up to the last 4)
+	if len(previousMessages) > 0 {
+		// Limit to last 4 messages
+		startIdx := 0
+		if len(previousMessages) > 4 {
+			startIdx = len(previousMessages) - 4
+		}
+
+		for _, msg := range previousMessages[startIdx:] {
+			contents = append(contents, GeminiContent{
+				Role: msg.Role,
 				Parts: []struct {
 					Text string `json:"text"`
 				}{
-					{Text: prompt},
+					{Text: msg.Content},
 				},
+			})
+		}
+	}
+
+	// Check if the current prompt is already included in the previous messages
+	addCurrentPrompt := true
+	if len(previousMessages) > 0 {
+		lastMsg := previousMessages[len(previousMessages)-1]
+		if lastMsg.Role == "user" && lastMsg.Content == prompt {
+			addCurrentPrompt = false
+		}
+	}
+
+	// Add the current prompt as a user message if needed
+	if addCurrentPrompt {
+		userContent := prompt
+		if finalSystemPrompt != "" {
+			userContent = finalSystemPrompt + "\n\n" + userContent
+		}
+		contents = append(contents, GeminiContent{
+			Role: "user",
+			Parts: []struct {
+				Text string `json:"text"`
+			}{
+				{Text: userContent},
 			},
-		},
+		})
+	} else if finalSystemPrompt != "" && len(contents) > 0 && contents[len(contents)-1].Role == "user" {
+		// If current prompt is not added, but system prompt exists and last message is user, prepend system prompt
+		contents[len(contents)-1].Parts[0].Text = finalSystemPrompt + "\n\n" + contents[len(contents)-1].Parts[0].Text
+	}
+
+	// Create the request body
+	reqBody := GeminiRequest{
+		Contents: contents,
 		GenerationConfig: struct {
 			Temperature     float64 `json:"temperature,omitempty"`
 			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 			TopP            float64 `json:"topP,omitempty"`
 			TopK            int     `json:"topK,omitempty"`
 		}{
-			Temperature:     0.7,
-			MaxOutputTokens: 2048,
-			TopP:            0.95,
-			TopK:            40,
+			Temperature: 0.7,
+			// MaxOutputTokens: 2048,
+			TopP: 0.95,
+			TopK: 40,
 		},
 	}
 
@@ -161,9 +220,6 @@ func StreamGeminiResponse(model, prompt string, onChunk func(string) error) erro
 	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse&key=%s", baseURL, modelName, apiKey)
 
 	// Create request with context for cancellation
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
@@ -252,9 +308,21 @@ func StreamGeminiResponse(model, prompt string, onChunk func(string) error) erro
 
 		// Send chunk to handler if there's content
 		if chunkText != "" {
-			if err := onChunk(chunkText); err != nil {
-				return fmt.Errorf("error processing chunk: %v", err)
+			chunkResponse := models.Response{
+				Message: chunkText,
+				Type:    "chunk",
 			}
+
+			msg, err := models.FormatSSEMessage(chunkResponse)
+			if err != nil {
+				return fmt.Errorf("error formatting chunk: %v", err)
+			}
+
+			_, err = fmt.Fprint(w, msg)
+			if err != nil {
+				return fmt.Errorf("error sending chunk: %v", err)
+			}
+			flusher.Flush()
 		}
 
 		// Check if done
@@ -271,6 +339,25 @@ func StreamGeminiResponse(model, prompt string, onChunk func(string) error) erro
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading stream: %v", err)
 	}
+
+	// Send completion signal
+	finalResponse := models.Response{
+		Type:      "end",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	msg, _ := models.FormatSSEMessage(finalResponse)
+	fmt.Fprint(w, msg)
+	flusher.Flush()
+
+	streamTime := time.Since(startTime)
+	streamLogger := logger.GetLogger("stream")
+	streamLogger.InfoWithFieldsCtx(ctx, "Gemini streaming completed", map[string]interface{}{
+		"client_id":     clientID,
+		"chunk_count":   chunkCount,
+		"stream_time_s": streamTime.Seconds(),
+		"model":         model,
+	})
 
 	return nil
 }
