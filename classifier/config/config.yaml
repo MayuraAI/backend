@@ -29,7 +29,7 @@ weights:
 
 model_scores:
   models:
-    llama3.2:
+    gemma3:
       cost_per_request: 0.001
       conversation: 0.88
       classification: 0.85
