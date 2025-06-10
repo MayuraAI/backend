@@ -51,17 +51,24 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		metrics := handlers.GetMetrics()
+
+		// Add rate limiting stats
+		rateLimitStats := middleware.GetRateLimitStats()
+		metrics["rate_limiting"] = rateLimitStats
+
 		json.NewEncoder(w).Encode(metrics)
 	})
 
-	// Protected route with Supabase auth middleware - only allow POST requests
+	// Protected route with rate limiting and Supabase auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Apply Supabase authentication middleware
-		middleware.SupabaseAuthMiddleware(http.HandlerFunc(handlers.ClientHandler)).ServeHTTP(w, r)
+		// Apply rate limiting first, then authentication middleware
+		middleware.RateLimitMiddleware()(
+			middleware.SupabaseAuthMiddleware(
+				http.HandlerFunc(handlers.ClientHandler))).ServeHTTP(w, r)
 	})
 
 	// Get port from environment or use default
