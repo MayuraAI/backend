@@ -2,116 +2,118 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"log"
-	"os"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/joho/godotenv"
+	"gateway/pkg/logger"
+
+	"github.com/supabase-community/auth-go"
+	"github.com/supabase-community/auth-go/types"
 )
 
+const (
+	supabaseProjectRef = "joqxsmypurgigczeyktl"
+	supabaseAnonKey    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcXhzbXlwdXJnaWdjemV5a3RsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MjE0NzIsImV4cCI6MjA2Mzk5NzQ3Mn0.kNIbZj7a4RVTgrvvm69-YuyrTalVxrZa32pidyMogxg"
+)
 
-// get from .env file godotenv
-func getSupabaseJWTSecret() string {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	supabaseJWTSecret := os.Getenv("SUPABASE_JWT_SECRET")
-	return supabaseJWTSecret
-}
+type supabaseContextKey string
 
-var supabaseJWTSecret = getSupabaseJWTSecret()
+const (
+	SupabaseUserContextKey  supabaseContextKey = "supabase_user"
+	SupabaseTokenContextKey supabaseContextKey = "supabase_token"
+)
 
-type SupabaseClaims struct {
-	Aud       string   `json:"aud"`
-	Exp       int64    `json:"exp"`
-	Sub       string   `json:"sub"`
-	Email     string   `json:"email"`
-	Phone     string   `json:"phone"`
-	AppMeta   AppMeta  `json:"app_metadata"`
-	UserMeta  UserMeta `json:"user_metadata"`
-	Role      string   `json:"role"`
-	SessionId string   `json:"session_id"`
-}
-
-type AppMeta struct {
-	Provider string `json:"provider"`
-}
-
-type UserMeta struct {
-	Email string `json:"email"`
-}
-
-type contextKey string
-
-const UserContextKey contextKey = "user"
-
-func AuthMiddleware(next http.Handler) http.Handler {
+// SupabaseAuthMiddleware validates Supabase access tokens using the auth-go client
+func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("supabase_auth")
+
 		// Get the Authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			log.Warn("Missing Authorization header")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Authorization header required", "status": 401}`))
 			return
 		}
 
 		// Check if the header has the Bearer prefix
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+			log.Warn("Invalid authorization header format")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Invalid authorization header format", "status": 401}`))
 			return
 		}
 
-		tokenString := parts[1]
+		tokenStr := parts[1]
 
-		// Parse and validate the JWT token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Validate the signing method
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
+		// Create auth client and verify token
+		client := auth.New(supabaseProjectRef, supabaseAnonKey).WithToken(tokenStr)
 
-			// Get the JWT secret from environment variable
-			// You should set this in your environment
-			jwtSecret := []byte(supabaseJWTSecret) // Replace with your actual JWT secret
-			return jwtSecret, nil
+		user, err := client.GetUser()
+		if err != nil {
+			log.WarnWithFields("Token validation failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Invalid or expired token", "status": 401}`))
+			return
+		}
+
+		// Print user details as requested
+		log.InfoWithFields("User authenticated successfully", map[string]interface{}{
+			"user_id":            user.ID.String(),
+			"email":              user.Email,
+			"phone":              user.Phone,
+			"created_at":         user.CreatedAt,
+			"updated_at":         user.UpdatedAt,
+			"role":               user.Role,
+			"email_confirmed_at": user.EmailConfirmedAt,
+			"phone_confirmed_at": user.PhoneConfirmedAt,
+			"last_sign_in_at":    user.LastSignInAt,
 		})
 
-		if err != nil {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
+		// Log additional user details for debugging
+		fmt.Printf("=== Authenticated User Details ===\n")
+		fmt.Printf("User ID: %s\n", user.ID.String())
+		fmt.Printf("Email: %s\n", user.Email)
+		fmt.Printf("Phone: %s\n", user.Phone)
+		fmt.Printf("Created At: %s\n", user.CreatedAt)
+		fmt.Printf("Updated At: %s\n", user.UpdatedAt)
+		fmt.Printf("Role: %s\n", user.Role)
+		if user.EmailConfirmedAt != nil {
+			fmt.Printf("Email Confirmed At: %s\n", *user.EmailConfirmedAt)
 		}
-
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Convert claims to SupabaseClaims
-			claimsJSON, err := json.Marshal(claims)
-			if err != nil {
-				http.Error(w, "Error processing token claims", http.StatusInternalServerError)
-				return
-			}
-
-			var supabaseClaims SupabaseClaims
-			if err := json.Unmarshal(claimsJSON, &supabaseClaims); err != nil {
-				http.Error(w, "Error processing token claims", http.StatusInternalServerError)
-				return
-			}
-
-			// Add the claims to the request context
-			ctx := context.WithValue(r.Context(), UserContextKey, supabaseClaims)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		} else {
-			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-			return
+		if user.PhoneConfirmedAt != nil {
+			fmt.Printf("Phone Confirmed At: %s\n", *user.PhoneConfirmedAt)
 		}
+		if user.LastSignInAt != nil {
+			fmt.Printf("Last Sign In At: %s\n", *user.LastSignInAt)
+		}
+		fmt.Printf("==================================\n")
+
+		// Add the user and token to the request context
+		ctx := context.WithValue(r.Context(), SupabaseUserContextKey, user)
+		ctx = context.WithValue(ctx, SupabaseTokenContextKey, tokenStr)
+
+		// Call the next handler with the updated context
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// GetUserFromContext retrieves the user claims from the context
-func GetUserFromContext(ctx context.Context) (SupabaseClaims, bool) {
-	user, ok := ctx.Value(UserContextKey).(SupabaseClaims)
+// GetSupabaseUserFromContext retrieves the authenticated user from the context
+func GetSupabaseUserFromContext(ctx context.Context) (*types.User, bool) {
+	user, ok := ctx.Value(SupabaseUserContextKey).(*types.User)
 	return user, ok
+}
+
+// GetSupabaseTokenFromContext retrieves the access token from the context
+func GetSupabaseTokenFromContext(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(SupabaseTokenContextKey).(string)
+	return token, ok
 }

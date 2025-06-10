@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	// "backend/middleware"
+	"gateway/middleware"
 	"gateway/models"
 	"gateway/pkg/logger"
 	"gateway/services"
@@ -22,6 +22,7 @@ type Response struct {
 	Timestamp string `json:"timestamp"`
 	UserID    string `json:"user_id,omitempty"`
 	Model     string `json:"model,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
 }
 
 type RequestBody struct {
@@ -47,6 +48,24 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	requestID := logger.GenerateRequestID()
 	ctx := logger.WithRequestID(r.Context(), requestID)
 	log := logger.GetLogger("client")
+
+	// Get authenticated user from context
+	user, userOk := middleware.GetSupabaseUserFromContext(ctx)
+	if userOk {
+		log.InfoWithFieldsCtx(ctx, "Processing request for authenticated user", map[string]interface{}{
+			"user_id": user.ID.String(),
+			"email":   user.Email,
+		})
+
+		// Print user details as requested
+		fmt.Printf("=== Request from Authenticated User ===\n")
+		fmt.Printf("User ID: %s\n", user.ID.String())
+		fmt.Printf("Email: %s\n", user.Email)
+		fmt.Printf("Phone: %s\n", user.Phone)
+		fmt.Printf("Role: %s\n", user.Role)
+		fmt.Printf("Created At: %s\n", user.CreatedAt)
+		fmt.Printf("======================================\n")
+	}
 
 	// Increment metrics
 	atomic.AddInt64(&totalRequests, 1)

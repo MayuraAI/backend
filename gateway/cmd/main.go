@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"gateway/handlers"
+	"gateway/middleware"
 	"gateway/pkg/logger"
-
-	// "gateway/middleware"
 
 	"github.com/joho/godotenv"
 )
@@ -55,14 +54,14 @@ func main() {
 		json.NewEncoder(w).Encode(metrics)
 	})
 
-	// Protected route with auth middleware - only allow POST requests
+	// Protected route with Supabase auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// middleware.AuthMiddleware(http.HandlerFunc(handlers.ClientHandler)).ServeHTTP(w, r)
-		http.HandlerFunc(handlers.ClientHandler).ServeHTTP(w, r)
+		// Apply Supabase authentication middleware
+		middleware.SupabaseAuthMiddleware(http.HandlerFunc(handlers.ClientHandler)).ServeHTTP(w, r)
 	})
 
 	// Get port from environment or use default
