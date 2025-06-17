@@ -71,6 +71,17 @@ func main() {
 				http.HandlerFunc(handlers.ClientHandler))).ServeHTTP(w, r)
 	})
 
+	// Rate limit status endpoint - requires authentication
+	mux.HandleFunc("/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Apply authentication middleware (rate limiting not needed for status check)
+		middleware.SupabaseAuthMiddleware(
+			http.HandlerFunc(handlers.RateLimitStatusHandler)).ServeHTTP(w, r)
+	})
+
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -129,9 +140,10 @@ func main() {
 		"http2":              "enabled",
 	})
 	log.InfoWithFields("Endpoints configured", map[string]interface{}{
-		"health":   port + "/health",
-		"metrics":  port + "/metrics",
-		"complete": port + "/complete",
+		"health":            port + "/health",
+		"metrics":           port + "/metrics",
+		"complete":          port + "/complete",
+		"rate-limit-status": port + "/rate-limit-status",
 	})
 
 	// Graceful shutdown

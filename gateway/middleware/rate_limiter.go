@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -34,7 +35,7 @@ type RateLimitConfig struct {
 
 // Default rate limiting configuration
 var defaultConfig = RateLimitConfig{
-	RequestsPerDay:  10,             // 10 requests per day per user
+	RequestsPerDay:  3,             // 10 requests per day per user
 	CleanupInterval: 24 * time.Hour, // Clean up every 24 hours
 	CleanupTTL:      48 * time.Hour, // Remove usage records older than 48 hours
 }
@@ -216,20 +217,37 @@ func RateLimitMiddleware(config ...RateLimitConfig) func(http.Handler) http.Hand
 				remaining = 0
 			}
 
-			// Add rate limit headers
+			// Add comprehensive rate limit headers
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
 			w.Header().Set("X-Request-Type", string(requestType))
+			w.Header().Set("X-RateLimit-Used", strconv.Itoa(currentCount))
 
-			// Log the request
+			// Add user-friendly status message
+			var statusMessage string
+			if requestType == ProRequest {
+				if remaining == 1 {
+					statusMessage = "1 pro request remaining today"
+				} else {
+					statusMessage = fmt.Sprintf("%d pro requests remaining today", remaining)
+				}
+			} else {
+				statusMessage = "All pro requests used - in free mode"
+			}
+			w.Header().Set("X-RateLimit-Status", statusMessage)
+
+			// Log the request with comprehensive information
 			log.InfoWithFields("Request processed", map[string]interface{}{
 				"key":          key,
 				"request_type": string(requestType),
 				"count":        currentCount,
 				"remaining":    remaining,
+				"daily_limit":  cfg.RequestsPerDay,
+				"reset_time":   resetTime.Format(time.RFC3339),
 				"ip":           getClientIP(r),
 				"path":         r.URL.Path,
+				"status":       statusMessage,
 			})
 
 			// Add request type to context for the handler to use
@@ -298,4 +316,14 @@ func getClientIP(r *http.Request) string {
 // GetRateLimitStats returns current rate limiter statistics
 func GetRateLimitStats() map[string]interface{} {
 	return globalRateLimiter.GetUsageStats()
+}
+
+// GetGlobalRateLimiter returns the global rate limiter instance for direct access
+func GetGlobalRateLimiter() *RateLimiter {
+	return globalRateLimiter
+}
+
+// GetDefaultConfig returns the default rate limiting configuration
+func GetDefaultConfig() RateLimitConfig {
+	return defaultConfig
 }
