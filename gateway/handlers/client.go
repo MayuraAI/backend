@@ -67,6 +67,25 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("======================================\n")
 	}
 
+	// Get request type from context (set by rate limiter)
+	requestType, hasRequestType := middleware.GetRequestTypeFromContext(ctx)
+	if hasRequestType {
+		log.InfoWithFieldsCtx(ctx, "Request type determined", map[string]interface{}{
+			"client_id":    clientID,
+			"request_type": string(requestType),
+		})
+
+		// Print request type for debugging
+		fmt.Printf("=== Request Type Information ===\n")
+		fmt.Printf("Request Type: %s\n", string(requestType))
+		if requestType == middleware.ProRequest {
+			fmt.Printf("Status: Within daily limit (Pro request)\n")
+		} else {
+			fmt.Printf("Status: Over daily limit (Free request)\n")
+		}
+		fmt.Printf("===============================\n")
+	}
+
 	// Increment metrics
 	atomic.AddInt64(&totalRequests, 1)
 	atomic.AddInt64(&activeConnections, 1)

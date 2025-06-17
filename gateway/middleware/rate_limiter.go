@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -10,40 +11,51 @@ import (
 	"gateway/pkg/logger"
 )
 
-// TokenBucket represents a token bucket for rate limiting
-type TokenBucket struct {
-	Capacity   int       // Maximum number of tokens (burst size)
-	Tokens     int       // Current number of tokens
-	RefillRate float64   // Tokens added per second
-	LastRefill time.Time // Last time tokens were added
-	mutex      sync.RWMutex
+// DailyUsage represents daily usage tracking for a user/IP
+type DailyUsage struct {
+	RequestCount int       // Number of requests made today
+	ResetTime    time.Time // When the daily limit resets (midnight)
+	mutex        sync.RWMutex
 }
 
-// RateLimiter manages multiple token buckets
+// RateLimiter manages daily usage tracking
 type RateLimiter struct {
-	buckets    map[string]*TokenBucket
+	usage      map[string]*DailyUsage
 	mutex      sync.RWMutex
 	cleanupTTL time.Duration
 }
 
 // RateLimitConfig holds rate limiting configuration
 type RateLimitConfig struct {
-	RequestsPerMinute int           // Overall rate limit per minute
-	BurstSize         int           // Maximum burst size
-	CleanupInterval   time.Duration // How often to clean up old buckets
-	CleanupTTL        time.Duration // How long to keep inactive buckets
+	RequestsPerDay  int           // Daily request limit
+	CleanupInterval time.Duration // How often to clean up old usage records
+	CleanupTTL      time.Duration // How long to keep inactive usage records
 }
 
 // Default rate limiting configuration
 var defaultConfig = RateLimitConfig{
-	RequestsPerMinute: 3,              // 3 requests per minute per user
-	BurstSize:         2,               // Allow burst of 2 requests
-	CleanupInterval:   1 * time.Minute,  // Clean up every 1 minute
-	CleanupTTL:        1 * time.Minute, // Remove buckets inactive for 1 minute
+	RequestsPerDay:  10,             // 10 requests per day per user
+	CleanupInterval: 24 * time.Hour, // Clean up every 24 hours
+	CleanupTTL:      48 * time.Hour, // Remove usage records older than 48 hours
 }
 
 // Global rate limiter instance
 var globalRateLimiter *RateLimiter
+
+// Context keys for request type
+type contextKey string
+
+const (
+	RequestTypeContextKey contextKey = "request_type"
+)
+
+// RequestType represents whether a request is pro or free
+type RequestType string
+
+const (
+	ProRequest  RequestType = "pro"
+	FreeRequest RequestType = "free"
+)
 
 // Initialize the rate limiter
 func init() {
@@ -53,7 +65,7 @@ func init() {
 // NewRateLimiter creates a new rate limiter with the given configuration
 func NewRateLimiter(config RateLimitConfig) *RateLimiter {
 	rl := &RateLimiter{
-		buckets:    make(map[string]*TokenBucket),
+		usage:      make(map[string]*DailyUsage),
 		cleanupTTL: config.CleanupTTL,
 	}
 
@@ -63,68 +75,81 @@ func NewRateLimiter(config RateLimitConfig) *RateLimiter {
 	return rl
 }
 
-// NewTokenBucket creates a new token bucket
-func NewTokenBucket(capacity int, refillRatePerSecond float64) *TokenBucket {
-	return &TokenBucket{
-		Capacity:   capacity,
-		Tokens:     capacity,
-		RefillRate: refillRatePerSecond,
-		LastRefill: time.Now(),
+// NewDailyUsage creates a new daily usage tracker
+func NewDailyUsage() *DailyUsage {
+	now := time.Now()
+	// Set reset time to next midnight
+	nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+
+	return &DailyUsage{
+		RequestCount: 0,
+		ResetTime:    nextMidnight,
 	}
 }
 
-// AllowRequest checks if a request should be allowed and consumes a token if so
-func (tb *TokenBucket) AllowRequest() bool {
-	tb.mutex.Lock()
-	defer tb.mutex.Unlock()
+// CheckAndIncrementUsage checks if a request should be considered pro or free and increments usage
+func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int) RequestType {
+	du.mutex.Lock()
+	defer du.mutex.Unlock()
 
 	now := time.Now()
-	elapsed := now.Sub(tb.LastRefill).Seconds()
 
-	// Calculate tokens to add based on elapsed time
-	tokensToAdd := elapsed * tb.RefillRate
-
-	if tokensToAdd > 0 {
-		// Add tokens but don't exceed capacity
-		newTokens := float64(tb.Tokens) + tokensToAdd
-		tb.Tokens = min(tb.Capacity, int(newTokens))
-		tb.LastRefill = now
+	// Check if we need to reset (new day)
+	if now.After(du.ResetTime) {
+		du.RequestCount = 0
+		// Set reset time to next midnight
+		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		du.ResetTime = nextMidnight
 	}
 
-	// Check if we have tokens available
-	if tb.Tokens > 0 {
-		tb.Tokens--
-		return true
-	}
+	// Increment request count
+	du.RequestCount++
 
-	return false
+	// Determine if this is a pro or free request
+	if du.RequestCount <= dailyLimit {
+		return ProRequest
+	}
+	return FreeRequest
 }
 
-// GetOrCreateBucket gets or creates a token bucket for the given key
-func (rl *RateLimiter) GetOrCreateBucket(key string, config RateLimitConfig) *TokenBucket {
+// GetUsageInfo returns current usage information
+func (du *DailyUsage) GetUsageInfo() (int, time.Time) {
+	du.mutex.RLock()
+	defer du.mutex.RUnlock()
+
+	now := time.Now()
+
+	// Check if we need to reset (new day)
+	if now.After(du.ResetTime) {
+		return 0, time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+	}
+
+	return du.RequestCount, du.ResetTime
+}
+
+// GetOrCreateUsage gets or creates a daily usage tracker for the given key
+func (rl *RateLimiter) GetOrCreateUsage(key string) *DailyUsage {
 	rl.mutex.RLock()
-	bucket, exists := rl.buckets[key]
+	usage, exists := rl.usage[key]
 	rl.mutex.RUnlock()
 
 	if exists {
-		return bucket
+		return usage
 	}
 
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 
-	if bucket, exists := rl.buckets[key]; exists {
-		return bucket
+	if usage, exists := rl.usage[key]; exists {
+		return usage
 	}
 
-	// Calculate refill rate: requests per minute -> tokens per second
-	refillRate := float64(config.RequestsPerMinute) / 60.0
-	bucket = NewTokenBucket(config.BurstSize, refillRate)
-	rl.buckets[key] = bucket
-	return bucket
+	usage = NewDailyUsage()
+	rl.usage[key] = usage
+	return usage
 }
 
-// cleanupRoutine periodically removes old buckets to prevent memory leaks
+// cleanupRoutine periodically removes old usage records to prevent memory leaks
 func (rl *RateLimiter) cleanupRoutine(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -134,31 +159,32 @@ func (rl *RateLimiter) cleanupRoutine(interval time.Duration) {
 	}
 }
 
-// cleanup removes old inactive buckets
+// cleanup removes old inactive usage records
 func (rl *RateLimiter) cleanup() {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 
 	now := time.Now()
-	for key, bucket := range rl.buckets {
-		bucket.mutex.RLock()
-		inactive := now.Sub(bucket.LastRefill) > rl.cleanupTTL
-		bucket.mutex.RUnlock()
+	for key, usage := range rl.usage {
+		usage.mutex.RLock()
+		// Remove records that haven't been used for more than the TTL
+		inactive := now.Sub(usage.ResetTime) > rl.cleanupTTL
+		usage.mutex.RUnlock()
 
 		if inactive {
-			delete(rl.buckets, key)
+			delete(rl.usage, key)
 		}
 	}
 }
 
-// GetBucketStats returns current bucket statistics
-func (rl *RateLimiter) GetBucketStats() map[string]interface{} {
+// GetUsageStats returns current usage statistics
+func (rl *RateLimiter) GetUsageStats() map[string]interface{} {
 	rl.mutex.RLock()
 	defer rl.mutex.RUnlock()
 
 	return map[string]interface{}{
-		"active_buckets": len(rl.buckets),
-		"cleanup_ttl":    rl.cleanupTTL.String(),
+		"active_users": len(rl.usage),
+		"cleanup_ttl":  rl.cleanupTTL.String(),
 	}
 }
 
@@ -177,41 +203,48 @@ func RateLimitMiddleware(config ...RateLimitConfig) func(http.Handler) http.Hand
 			// Create rate limit key based on user ID (from auth) or IP address
 			key := getRateLimitKey(r)
 
-			// Get or create bucket for this key
-			bucket := globalRateLimiter.GetOrCreateBucket(key, cfg)
+			// Get or create usage tracker for this key
+			usage := globalRateLimiter.GetOrCreateUsage(key)
 
-			// Check if request is allowed
-			if !bucket.AllowRequest() {
-				log.WarnWithFields("Rate limit exceeded", map[string]interface{}{
-					"key":        key,
-					"ip":         getClientIP(r),
-					"user_agent": r.UserAgent(),
-					"path":       r.URL.Path,
-				})
+			// Check and increment usage, get request type
+			requestType := usage.CheckAndIncrementUsage(cfg.RequestsPerDay)
 
-				// Return rate limit error in streaming format
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerMinute))
-				w.Header().Set("X-RateLimit-Remaining", "0")
-				w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
-				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error": "Rate limit exceeded. Please try again later.", "status": 429}`))
-				return
+			// Get current usage info for headers
+			currentCount, resetTime := usage.GetUsageInfo()
+			remaining := cfg.RequestsPerDay - currentCount
+			if remaining < 0 {
+				remaining = 0
 			}
 
 			// Add rate limit headers
-			bucket.mutex.RLock()
-			remaining := bucket.Tokens
-			bucket.mutex.RUnlock()
-
-			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerMinute))
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+			w.Header().Set("X-Request-Type", string(requestType))
 
-			// Continue to next handler
-			next.ServeHTTP(w, r)
+			// Log the request
+			log.InfoWithFields("Request processed", map[string]interface{}{
+				"key":          key,
+				"request_type": string(requestType),
+				"count":        currentCount,
+				"remaining":    remaining,
+				"ip":           getClientIP(r),
+				"path":         r.URL.Path,
+			})
+
+			// Add request type to context for the handler to use
+			ctx := context.WithValue(r.Context(), RequestTypeContextKey, requestType)
+
+			// Continue to next handler (we don't block any requests)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// GetRequestTypeFromContext retrieves the request type from the context
+func GetRequestTypeFromContext(ctx context.Context) (RequestType, bool) {
+	requestType, ok := ctx.Value(RequestTypeContextKey).(RequestType)
+	return requestType, ok
 }
 
 // getRateLimitKey generates a key for rate limiting based on user ID or IP
@@ -262,15 +295,7 @@ func getClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // GetRateLimitStats returns current rate limiter statistics
 func GetRateLimitStats() map[string]interface{} {
-	return globalRateLimiter.GetBucketStats()
+	return globalRateLimiter.GetUsageStats()
 }
