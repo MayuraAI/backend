@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -30,6 +31,19 @@ type RequestBody struct {
 	PreviousMessages      []models.ChatMessage `json:"previous_messages,omitempty"`
 	ProfileContext        string               `json:"profile_context,omitempty"`
 	WorkspaceInstructions string               `json:"workspace_instructions,omitempty"`
+}
+
+// RateLimitStatus represents the current rate limiting status for a user
+type RateLimitStatus struct {
+	DailyLimit        int                    `json:"daily_limit"`
+	RequestsUsed      int                    `json:"requests_used"`
+	RequestsRemaining int                    `json:"requests_remaining"`
+	CurrentMode       middleware.RequestType `json:"current_mode"` // "pro" or "free"
+	ResetTime         time.Time              `json:"reset_time"`
+	ResetTimeUnix     int64                  `json:"reset_time_unix"`
+	UserID            string                 `json:"user_id,omitempty"`
+	UserEmail         string                 `json:"user_email,omitempty"`
+	Message           string                 `json:"message"`
 }
 
 // Global metrics for monitoring
@@ -82,6 +96,14 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("Status: Within daily limit (Pro request)\n")
 		} else {
 			fmt.Printf("Status: Over daily limit (Free request)\n")
+		}
+
+		// Get additional rate limit info from headers
+		if rateLimit := r.Header.Get("X-RateLimit-Remaining"); rateLimit != "" {
+			fmt.Printf("Remaining Pro Requests: %s\n", rateLimit)
+		}
+		if status := r.Header.Get("X-RateLimit-Status"); status != "" {
+			fmt.Printf("Status Message: %s\n", status)
 		}
 		fmt.Printf("===============================\n")
 	}
@@ -376,4 +398,140 @@ func GetMetrics() map[string]interface{} {
 		"error_rate":            float64(atomic.LoadInt64(&totalErrors)) / float64(atomic.LoadInt64(&totalRequests)),
 		"circuit_breaker_stats": services.GetCircuitBreakerStats(),
 	}
+}
+
+// RateLimitStatusHandler returns the current rate limiting status for the authenticated user
+func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
+	log := logger.GetLogger("rate_limit_status")
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user from context
+	user, userOk := middleware.GetSupabaseUserFromContext(r.Context())
+
+	// Get rate limit key (same logic as rate limiter)
+	var key string
+	if userOk && user != nil {
+		key = "user:" + user.ID.String()
+	} else {
+		// Fall back to IP address for unauthenticated users
+		key = "ip:" + getClientIP(r)
+	}
+
+	// Get current usage from the global rate limiter
+	usage := middleware.GetGlobalRateLimiter().GetOrCreateUsage(key)
+	currentCount, resetTime := usage.GetUsageInfo()
+
+	// Get the daily limit from default config
+	dailyLimit := middleware.GetDefaultConfig().RequestsPerDay
+
+	// Calculate remaining requests
+	remaining := dailyLimit - currentCount
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// Determine current mode
+	var currentMode middleware.RequestType
+	var message string
+
+	if currentCount < dailyLimit {
+		currentMode = middleware.ProRequest
+		if remaining == 1 {
+			message = "You have 1 pro request remaining today"
+		} else {
+			message = fmt.Sprintf("You have %d pro requests remaining today", remaining)
+		}
+	} else {
+		currentMode = middleware.FreeRequest
+		message = "You've used all your pro requests for today. All additional requests are free requests."
+	}
+
+	// Create response
+	status := RateLimitStatus{
+		DailyLimit:        dailyLimit,
+		RequestsUsed:      currentCount,
+		RequestsRemaining: remaining,
+		CurrentMode:       currentMode,
+		ResetTime:         resetTime,
+		ResetTimeUnix:     resetTime.Unix(),
+		Message:           message,
+	}
+
+	// Add user info if authenticated
+	if userOk && user != nil {
+		status.UserID = user.ID.String()
+		status.UserEmail = user.Email
+	}
+
+	// Log the status check
+	log.InfoWithFields("Rate limit status requested", map[string]interface{}{
+		"key":                key,
+		"requests_used":      currentCount,
+		"requests_remaining": remaining,
+		"current_mode":       string(currentMode),
+		"reset_time":         resetTime.Format(time.RFC3339),
+	})
+
+	// Return JSON response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.ErrorWithFields("Error encoding rate limit status", map[string]interface{}{
+			"error": err.Error(),
+		}, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// getClientIP extracts the real client IP address (duplicate from rate_limiter.go for this handler)
+func getClientIP(r *http.Request) string {
+	// Check for common proxy headers
+	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+		// X-Forwarded-For can contain multiple IPs, take the first one
+		if idx := len(ip); idx > 0 {
+			if commaIdx := 0; commaIdx < idx {
+				for i, char := range ip {
+					if char == ',' {
+						commaIdx = i
+						break
+					}
+				}
+				if commaIdx > 0 {
+					return ip[:commaIdx]
+				}
+			}
+			return ip
+		}
+	}
+
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+
+	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+		return ip
+	}
+
+	// Fall back to RemoteAddr
+	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return ip
+	}
+
+	return r.RemoteAddr
 }
