@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -430,7 +429,7 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		key = "user:" + user.ID.String()
 	} else {
 		// Fall back to IP address for unauthenticated users
-		key = "ip:" + getClientIP(r)
+		key = "user:global"
 	}
 
 	// Get current usage from the global rate limiter
@@ -497,41 +496,4 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-}
-
-// getClientIP extracts the real client IP address (duplicate from rate_limiter.go for this handler)
-func getClientIP(r *http.Request) string {
-	// Check for common proxy headers
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first one
-		if idx := len(ip); idx > 0 {
-			if commaIdx := 0; commaIdx < idx {
-				for i, char := range ip {
-					if char == ',' {
-						commaIdx = i
-						break
-					}
-				}
-				if commaIdx > 0 {
-					return ip[:commaIdx]
-				}
-			}
-			return ip
-		}
-	}
-
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return ip
-	}
-
-	// Fall back to RemoteAddr
-	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return ip
-	}
-
-	return r.RemoteAddr
 }
