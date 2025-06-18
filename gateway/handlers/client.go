@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	// "backend/middleware"
+	"gateway/middleware"
 	"gateway/models"
 	"gateway/pkg/logger"
 	"gateway/services"
@@ -22,6 +22,7 @@ type Response struct {
 	Timestamp string `json:"timestamp"`
 	UserID    string `json:"user_id,omitempty"`
 	Model     string `json:"model,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
 }
 
 type RequestBody struct {
@@ -29,6 +30,19 @@ type RequestBody struct {
 	PreviousMessages      []models.ChatMessage `json:"previous_messages,omitempty"`
 	ProfileContext        string               `json:"profile_context,omitempty"`
 	WorkspaceInstructions string               `json:"workspace_instructions,omitempty"`
+}
+
+// RateLimitStatus represents the current rate limiting status for a user
+type RateLimitStatus struct {
+	DailyLimit        int                    `json:"daily_limit"`
+	RequestsUsed      int                    `json:"requests_used"`
+	RequestsRemaining int                    `json:"requests_remaining"`
+	CurrentMode       middleware.RequestType `json:"current_mode"` // "pro" or "free"
+	ResetTime         time.Time              `json:"reset_time"`
+	ResetTimeUnix     int64                  `json:"reset_time_unix"`
+	UserID            string                 `json:"user_id,omitempty"`
+	UserEmail         string                 `json:"user_email,omitempty"`
+	Message           string                 `json:"message"`
 }
 
 // Global metrics for monitoring
@@ -47,6 +61,51 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	requestID := logger.GenerateRequestID()
 	ctx := logger.WithRequestID(r.Context(), requestID)
 	log := logger.GetLogger("client")
+
+	// Get authenticated user from context
+	user, userOk := middleware.GetSupabaseUserFromContext(ctx)
+	if userOk {
+		log.InfoWithFieldsCtx(ctx, "Processing request for authenticated user", map[string]interface{}{
+			"user_id": user.ID.String(),
+			"email":   user.Email,
+		})
+
+		// Print user details as requested
+		fmt.Printf("=== Request from Authenticated User ===\n")
+		fmt.Printf("User ID: %s\n", user.ID.String())
+		fmt.Printf("Email: %s\n", user.Email)
+		fmt.Printf("Phone: %s\n", user.Phone)
+		fmt.Printf("Role: %s\n", user.Role)
+		fmt.Printf("Created At: %s\n", user.CreatedAt)
+		fmt.Printf("======================================\n")
+	}
+
+	// Get request type from context (set by rate limiter)
+	requestType, hasRequestType := middleware.GetRequestTypeFromContext(ctx)
+	if hasRequestType {
+		log.InfoWithFieldsCtx(ctx, "Request type determined", map[string]interface{}{
+			"client_id":    clientID,
+			"request_type": string(requestType),
+		})
+
+		// Print request type for debugging
+		fmt.Printf("=== Request Type Information ===\n")
+		fmt.Printf("Request Type: %s\n", string(requestType))
+		if requestType == middleware.ProRequest {
+			fmt.Printf("Status: Within daily limit (Pro request)\n")
+		} else {
+			fmt.Printf("Status: Over daily limit (Free request)\n")
+		}
+
+		// Get additional rate limit info from headers
+		if rateLimit := r.Header.Get("X-RateLimit-Remaining"); rateLimit != "" {
+			fmt.Printf("Remaining Pro Requests: %s\n", rateLimit)
+		}
+		if status := r.Header.Get("X-RateLimit-Status"); status != "" {
+			fmt.Printf("Status Message: %s\n", status)
+		}
+		fmt.Printf("===============================\n")
+	}
 
 	// Increment metrics
 	atomic.AddInt64(&totalRequests, 1)
@@ -337,5 +396,104 @@ func GetMetrics() map[string]interface{} {
 		"total_errors":          atomic.LoadInt64(&totalErrors),
 		"error_rate":            float64(atomic.LoadInt64(&totalErrors)) / float64(atomic.LoadInt64(&totalRequests)),
 		"circuit_breaker_stats": services.GetCircuitBreakerStats(),
+	}
+}
+
+// RateLimitStatusHandler returns the current rate limiting status for the authenticated user
+func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
+	log := logger.GetLogger("rate_limit_status")
+
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user from context
+	user, userOk := middleware.GetSupabaseUserFromContext(r.Context())
+
+	// Get rate limit key (same logic as rate limiter)
+	var key string
+	if userOk && user != nil {
+		key = "user:" + user.ID.String()
+	} else {
+		// Fall back to IP address for unauthenticated users
+		key = "user:global"
+	}
+
+	// Get current usage from the global rate limiter
+	usage := middleware.GetGlobalRateLimiter().GetOrCreateUsage(key)
+	currentCount, resetTime := usage.GetUsageInfo()
+
+	// Get the daily limit from default config
+	dailyLimit := middleware.GetDefaultConfig().RequestsPerDay
+
+	// Calculate remaining requests
+	remaining := dailyLimit - currentCount
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// Determine current mode
+	var currentMode middleware.RequestType
+	var message string
+
+	if currentCount < dailyLimit {
+		currentMode = middleware.ProRequest
+		if remaining == 1 {
+			message = "You have 1 pro request remaining today"
+		} else {
+			message = fmt.Sprintf("You have %d pro requests remaining today", remaining)
+		}
+	} else {
+		currentMode = middleware.FreeRequest
+		message = "You've used all your pro requests for today. All additional requests are free requests."
+	}
+
+	// Create response
+	status := RateLimitStatus{
+		DailyLimit:        dailyLimit,
+		RequestsUsed:      currentCount,
+		RequestsRemaining: remaining,
+		CurrentMode:       currentMode,
+		ResetTime:         resetTime,
+		ResetTimeUnix:     resetTime.Unix(),
+		Message:           message,
+	}
+
+	// Add user info if authenticated
+	if userOk && user != nil {
+		status.UserID = user.ID.String()
+		status.UserEmail = user.Email
+	}
+
+	// Log the status check
+	log.InfoWithFields("Rate limit status requested", map[string]interface{}{
+		"key":                key,
+		"requests_used":      currentCount,
+		"requests_remaining": remaining,
+		"current_mode":       string(currentMode),
+		"reset_time":         resetTime.Format(time.RFC3339),
+	})
+
+	// Return JSON response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.ErrorWithFields("Error encoding rate limit status", map[string]interface{}{
+			"error": err.Error(),
+		}, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 }

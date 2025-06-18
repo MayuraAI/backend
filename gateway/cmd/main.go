@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"gateway/handlers"
+	"gateway/middleware"
 	"gateway/pkg/logger"
-
-	// "gateway/middleware"
 
 	"github.com/joho/godotenv"
 )
@@ -52,17 +51,38 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		metrics := handlers.GetMetrics()
+
+		// Add rate limiting stats
+		rateLimitStats := middleware.GetRateLimitStats()
+		metrics["rate_limiting"] = rateLimitStats
+
 		json.NewEncoder(w).Encode(metrics)
 	})
 
-	// Protected route with auth middleware - only allow POST requests
+	// Protected route with rate limiting and Supabase auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// middleware.AuthMiddleware(http.HandlerFunc(handlers.ClientHandler)).ServeHTTP(w, r)
-		http.HandlerFunc(handlers.ClientHandler).ServeHTTP(w, r)
+		// Apply rate limiting first, then authentication middleware
+		middleware.SupabaseAuthMiddleware(
+			middleware.RateLimitMiddleware(
+				http.HandlerFunc(handlers.ClientHandler),
+				middleware.GetDefaultConfig(),
+			),
+		).ServeHTTP(w, r)
+	})
+
+	// Rate limit status endpoint - requires authentication
+	mux.HandleFunc("/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Apply authentication middleware (rate limiting not needed for status check)
+		middleware.SupabaseAuthMiddleware(
+			http.HandlerFunc(handlers.RateLimitStatusHandler)).ServeHTTP(w, r)
 	})
 
 	// Get port from environment or use default
@@ -123,9 +143,10 @@ func main() {
 		"http2":              "enabled",
 	})
 	log.InfoWithFields("Endpoints configured", map[string]interface{}{
-		"health":   port + "/health",
-		"metrics":  port + "/metrics",
-		"complete": port + "/complete",
+		"health":            port + "/health",
+		"metrics":           port + "/metrics",
+		"complete":          port + "/complete",
+		"rate-limit-status": port + "/rate-limit-status",
 	})
 
 	// Graceful shutdown
