@@ -107,8 +107,8 @@ func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 }
 
 // GetSupabaseUserFromContext retrieves the authenticated user from the context
-func GetSupabaseUserFromContext(ctx context.Context) (*types.User, bool) {
-	user, ok := ctx.Value(SupabaseUserContextKey).(*types.User)
+func GetSupabaseUserFromContext(ctx context.Context) (*types.UserResponse, bool) {
+	user, ok := ctx.Value(SupabaseUserContextKey).(*types.UserResponse)
 	return user, ok
 }
 

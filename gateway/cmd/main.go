@@ -66,9 +66,12 @@ func main() {
 			return
 		}
 		// Apply rate limiting first, then authentication middleware
-		middleware.RateLimitMiddleware()(
-			middleware.SupabaseAuthMiddleware(
-				http.HandlerFunc(handlers.ClientHandler))).ServeHTTP(w, r)
+		middleware.SupabaseAuthMiddleware(
+			middleware.RateLimitMiddleware(
+				http.HandlerFunc(handlers.ClientHandler),
+				middleware.GetDefaultConfig(),
+			),
+		).ServeHTTP(w, r)
 	})
 
 	// Rate limit status endpoint - requires authentication

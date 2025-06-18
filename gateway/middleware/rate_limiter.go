@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -190,73 +189,67 @@ func (rl *RateLimiter) GetUsageStats() map[string]interface{} {
 }
 
 // RateLimitMiddleware creates a rate limiting middleware
-func RateLimitMiddleware(config ...RateLimitConfig) func(http.Handler) http.Handler {
+func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler {
 	// Use provided config or default
-	cfg := defaultConfig
-	if len(config) > 0 {
-		cfg = config[0]
-	}
+	cfg := config
 
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log := logger.GetLogger("rate_limiter")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("rate_limiter")
 
-			// Create rate limit key based on user ID (from auth) or IP address
-			key := getRateLimitKey(r)
+		// Create rate limit key based on user ID (from auth) or IP address
+		key := getRateLimitKey(r)
 
-			// Get or create usage tracker for this key
-			usage := globalRateLimiter.GetOrCreateUsage(key)
+		// Get or create usage tracker for this key
+		usage := globalRateLimiter.GetOrCreateUsage(key)
 
-			// Check and increment usage, get request type
-			requestType := usage.CheckAndIncrementUsage(cfg.RequestsPerDay)
+		// Check and increment usage, get request type
+		requestType := usage.CheckAndIncrementUsage(cfg.RequestsPerDay)
 
-			// Get current usage info for headers
-			currentCount, resetTime := usage.GetUsageInfo()
-			remaining := cfg.RequestsPerDay - currentCount
-			if remaining < 0 {
-				remaining = 0
-			}
+		// Get current usage info for headers
+		currentCount, resetTime := usage.GetUsageInfo()
+		remaining := cfg.RequestsPerDay - currentCount
+		if remaining < 0 {
+			remaining = 0
+		}
 
-			// Add comprehensive rate limit headers
-			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
-			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
-			w.Header().Set("X-Request-Type", string(requestType))
-			w.Header().Set("X-RateLimit-Used", strconv.Itoa(currentCount))
+		// Add comprehensive rate limit headers
+		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+		w.Header().Set("X-Request-Type", string(requestType))
+		w.Header().Set("X-RateLimit-Used", strconv.Itoa(currentCount))
 
-			// Add user-friendly status message
-			var statusMessage string
-			if requestType == ProRequest {
-				if remaining == 1 {
-					statusMessage = "1 pro request remaining today"
-				} else {
-					statusMessage = fmt.Sprintf("%d pro requests remaining today", remaining)
-				}
+		// Add user-friendly status message
+		var statusMessage string
+		if requestType == ProRequest {
+			if remaining == 1 {
+				statusMessage = "1 pro request remaining today"
 			} else {
-				statusMessage = "All pro requests used - in free mode"
+				statusMessage = fmt.Sprintf("%d pro requests remaining today", remaining)
 			}
-			w.Header().Set("X-RateLimit-Status", statusMessage)
+		} else {
+			statusMessage = "All pro requests used - in free mode"
+		}
+		w.Header().Set("X-RateLimit-Status", statusMessage)
 
-			// Log the request with comprehensive information
-			log.InfoWithFields("Request processed", map[string]interface{}{
-				"key":          key,
-				"request_type": string(requestType),
-				"count":        currentCount,
-				"remaining":    remaining,
-				"daily_limit":  cfg.RequestsPerDay,
-				"reset_time":   resetTime.Format(time.RFC3339),
-				"ip":           getClientIP(r),
-				"path":         r.URL.Path,
-				"status":       statusMessage,
-			})
-
-			// Add request type to context for the handler to use
-			ctx := context.WithValue(r.Context(), RequestTypeContextKey, requestType)
-
-			// Continue to next handler (we don't block any requests)
-			next.ServeHTTP(w, r.WithContext(ctx))
+		// Log the request with comprehensive information
+		log.InfoWithFields("Request processed", map[string]interface{}{
+			"key":          key,
+			"request_type": string(requestType),
+			"count":        currentCount,
+			"remaining":    remaining,
+			"daily_limit":  cfg.RequestsPerDay,
+			"reset_time":   resetTime.Format(time.RFC3339),
+			"path":         r.URL.Path,
+			"status":       statusMessage,
 		})
-	}
+
+		// Add request type to context for the handler to use
+		ctx := context.WithValue(r.Context(), RequestTypeContextKey, requestType)
+
+		// Continue to next handler (we don't block any requests)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // GetRequestTypeFromContext retrieves the request type from the context
@@ -271,46 +264,7 @@ func getRateLimitKey(r *http.Request) string {
 	if user, ok := GetSupabaseUserFromContext(r.Context()); ok && user != nil {
 		return "user:" + user.ID.String()
 	}
-
-	// Fall back to IP address
-	return "ip:" + getClientIP(r)
-}
-
-// getClientIP extracts the real client IP address
-func getClientIP(r *http.Request) string {
-	// Check for common proxy headers
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first one
-		if idx := len(ip); idx > 0 {
-			if commaIdx := 0; commaIdx < idx {
-				for i, char := range ip {
-					if char == ',' {
-						commaIdx = i
-						break
-					}
-				}
-				if commaIdx > 0 {
-					return ip[:commaIdx]
-				}
-			}
-			return ip
-		}
-	}
-
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return ip
-	}
-
-	// Fall back to RemoteAddr
-	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return ip
-	}
-
-	return r.RemoteAddr
+	return "user:global"
 }
 
 // GetRateLimitStats returns current rate limiter statistics
