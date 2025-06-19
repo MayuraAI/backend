@@ -348,13 +348,13 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // streamModelResponse handles streaming with fallback logic for different providers
-func streamModelResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, modelName string, displayName string, providerName string, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string) error {
+func streamModelResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, modelName string, displayName string, providerName string, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
 	var err error
 
 	// Route to appropriate provider based on provider name
 	switch providerName {
 	case "gemini":
-		err = services.StreamGeminiResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext)
+		err = services.StreamGeminiResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext, isThinkingModel)
 	case "openrouter":
 		err = services.StreamOpenRouterResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext)
 	case "groq":
@@ -377,57 +377,66 @@ func streamModelResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 // streamWithFallback tries models in order with fallback logic
 func streamWithFallback(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, modelResponse services.ModelResponse, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string) error {
 	modelsToTry := []struct {
-		modelName   string
-		provider    string
-		displayName string
+		modelName       string
+		provider        string
+		displayName     string
+		isThinkingModel bool
 	}{}
 
 	// Extract model information from response metadata
 	if len(modelResponse.Metadata.ModelScores) == 0 {
 		modelsToTry = append(modelsToTry, struct {
-			modelName   string
-			provider    string
-			displayName string
+			modelName       string
+			provider        string
+			displayName     string
+			isThinkingModel bool
 		}{
-			modelName:   modelResponse.DefaultModel,
-			provider:    "default", // Fallback provider
-			displayName: modelResponse.DefaultModelDisplayName,
+			modelName:       modelResponse.DefaultModel,
+			provider:        "default", // Fallback provider
+			displayName:     modelResponse.DefaultModelDisplayName,
+			isThinkingModel: false, // Default to false for fallback
 		})
 	} else {
 		if primaryScore, exists := modelResponse.Metadata.ModelScores[modelResponse.PrimaryModel]; exists {
 			modelsToTry = append(modelsToTry, struct {
-				modelName   string
-				provider    string
-				displayName string
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
 			}{
-				modelName:   primaryScore.ProviderModelName,
-				provider:    primaryScore.Provider,
-				displayName: primaryScore.DisplayName,
+				modelName:       primaryScore.ProviderModelName,
+				provider:        primaryScore.Provider,
+				displayName:     primaryScore.DisplayName,
+				isThinkingModel: primaryScore.IsThinkingModel,
 			})
 		}
 
 		if secondaryScore, exists := modelResponse.Metadata.ModelScores[modelResponse.SecondaryModel]; exists {
 			modelsToTry = append(modelsToTry, struct {
-				modelName   string
-				provider    string
-				displayName string
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
 			}{
-				modelName:   secondaryScore.ProviderModelName,
-				provider:    secondaryScore.Provider,
-				displayName: secondaryScore.DisplayName,
+				modelName:       secondaryScore.ProviderModelName,
+				provider:        secondaryScore.Provider,
+				displayName:     secondaryScore.DisplayName,
+				isThinkingModel: secondaryScore.IsThinkingModel,
 			})
 		}
 
 		// Add default model as fallback
 		if defaultScore, exists := modelResponse.Metadata.ModelScores[modelResponse.DefaultModel]; exists {
 			modelsToTry = append(modelsToTry, struct {
-				modelName   string
-				provider    string
-				displayName string
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
 			}{
-				modelName:   defaultScore.ProviderModelName,
-				provider:    defaultScore.Provider,
-				displayName: defaultScore.DisplayName,
+				modelName:       defaultScore.ProviderModelName,
+				provider:        defaultScore.Provider,
+				displayName:     defaultScore.DisplayName,
+				isThinkingModel: defaultScore.IsThinkingModel,
 			})
 		}
 	}
@@ -440,7 +449,7 @@ func streamWithFallback(ctx context.Context, w http.ResponseWriter, flusher http
 		log.Printf("Trying model %d/%d: %s (%s) for client %d", i+1, len(modelsToTry), model.displayName, model.provider, clientID)
 
 		// Try to stream with this model
-		err := streamModelResponse(ctx, w, flusher, model.modelName, model.displayName, model.provider, prompt, clientID, previousMessages, profileContext)
+		err := streamModelResponse(ctx, w, flusher, model.modelName, model.displayName, model.provider, prompt, clientID, previousMessages, profileContext, model.isThinkingModel)
 
 		if err == nil {
 			// Success!

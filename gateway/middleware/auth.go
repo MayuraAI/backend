@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -76,38 +75,6 @@ func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 			w.Write([]byte(`{"error": "Invalid or expired token", "status": 401}`))
 			return
 		}
-
-		// Print user details as requested
-		log.InfoWithFields("User authenticated successfully", map[string]interface{}{
-			"user_id":            user.ID.String(),
-			"email":              user.Email,
-			"phone":              user.Phone,
-			"created_at":         user.CreatedAt,
-			"updated_at":         user.UpdatedAt,
-			"role":               user.Role,
-			"email_confirmed_at": user.EmailConfirmedAt,
-			"phone_confirmed_at": user.PhoneConfirmedAt,
-			"last_sign_in_at":    user.LastSignInAt,
-		})
-
-		// Log additional user details for debugging
-		fmt.Printf("=== Authenticated User Details ===\n")
-		fmt.Printf("User ID: %s\n", user.ID.String())
-		fmt.Printf("Email: %s\n", user.Email)
-		fmt.Printf("Phone: %s\n", user.Phone)
-		fmt.Printf("Created At: %s\n", user.CreatedAt)
-		fmt.Printf("Updated At: %s\n", user.UpdatedAt)
-		fmt.Printf("Role: %s\n", user.Role)
-		if user.EmailConfirmedAt != nil {
-			fmt.Printf("Email Confirmed At: %s\n", *user.EmailConfirmedAt)
-		}
-		if user.PhoneConfirmedAt != nil {
-			fmt.Printf("Phone Confirmed At: %s\n", *user.PhoneConfirmedAt)
-		}
-		if user.LastSignInAt != nil {
-			fmt.Printf("Last Sign In At: %s\n", *user.LastSignInAt)
-		}
-		fmt.Printf("==================================\n")
 
 		// Add the user and token to the request context
 		ctx := context.WithValue(r.Context(), SupabaseUserContextKey, user)
