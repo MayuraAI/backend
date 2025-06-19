@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"gateway/pkg/logger"
@@ -12,10 +13,20 @@ import (
 	"github.com/supabase-community/auth-go/types"
 )
 
-const (
-	supabaseProjectRef = "joqxsmypurgigczeyktl"
-	supabaseAnonKey    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcXhzbXlwdXJnaWdjemV5a3RsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MjE0NzIsImV4cCI6MjA2Mzk5NzQ3Mn0.kNIbZj7a4RVTgrvvm69-YuyrTalVxrZa32pidyMogxg"
-)
+// getSupabaseConfig returns Supabase configuration from environment variables
+func getSupabaseConfig() (projectRef, anonKey string) {
+	projectRef = os.Getenv("SUPABASE_PROJECT_REF")
+	if projectRef == "" {
+		projectRef = "joqxsmypurgigczeyktl" // Default fallback
+	}
+
+	anonKey = os.Getenv("SUPABASE_ANON_KEY")
+	if anonKey == "" {
+		anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcXhzbXlwdXJnaWdjemV5a3RsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MjE0NzIsImV4cCI6MjA2Mzk5NzQ3Mn0.kNIbZj7a4RVTgrvvm69-YuyrTalVxrZa32pidyMogxg" // Default fallback
+	}
+
+	return projectRef, anonKey
+}
 
 type supabaseContextKey string
 
@@ -52,7 +63,8 @@ func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 		tokenStr := parts[1]
 
 		// Create auth client and verify token
-		client := auth.New(supabaseProjectRef, supabaseAnonKey).WithToken(tokenStr)
+		projectRef, anonKey := getSupabaseConfig()
+		client := auth.New(projectRef, anonKey).WithToken(tokenStr)
 
 		user, err := client.GetUser()
 		if err != nil {

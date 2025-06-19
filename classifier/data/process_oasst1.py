@@ -16,7 +16,6 @@ from pathlib import Path
 import pandas as pd
 from datasets import load_dataset
 from tqdm import tqdm
-import logging
 
 # Configuration
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -66,7 +65,7 @@ class OllamaScorer:
                 return any(self.model_name in name for name in model_names)
             return False
         except Exception as e:
-            logging.error(f"Connection test failed: {e}")
+            print(f"Connection test failed: {e}")
             return False
     
     def score_prompt(self, prompt: str) -> Optional[str]:
@@ -93,11 +92,11 @@ class OllamaScorer:
                 result = response.json()
                 return self._parse_category(result.get('response', ''))
             else:
-                logging.error(f"API error: {response.status_code} - {response.text}")
+                print(f"API error: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
-            logging.error(f"Error classifying prompt: {e}")
+            print(f"Error classifying prompt: {e}")
             return None
     
     def _create_scoring_prompt(self, prompt: str) -> str:
@@ -142,11 +141,11 @@ Respond with ONLY the category name (no explanation, no other text):"""
                     return valid_category
             
             # Default fallback
-            logging.warning(f"Invalid category response: {response}, using 'conversation' as fallback")
+            print(f"Invalid category response: {response}, using 'conversation' as fallback")
             return "conversation"
             
         except Exception as e:
-            logging.error(f"Error parsing category: {e}")
+            print(f"Error parsing category: {e}")
             return "conversation"
 
 class DatasetProcessor:
@@ -159,19 +158,9 @@ class DatasetProcessor:
         self.checkpoint_file = self.data_dir / CHECKPOINT_FILE
         self.log_file = self.data_dir / LOG_FILE
         
-        # Setup logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(self.log_file),
-                logging.StreamHandler()
-            ]
-        )
-        
     def load_dataset(self) -> List[Dict]:
         """Load and filter the OASST1 dataset"""
-        logging.info("Loading OpenAssistant/oasst1 dataset...")
+        print("Loading OpenAssistant/oasst1 dataset...")
         
         try:
             dataset = load_dataset("OpenAssistant/oasst1", split="train")
@@ -184,11 +173,11 @@ class DatasetProcessor:
                         'text': item.get('text', '').strip(),
                     })
             
-            logging.info(f"Loaded {len(prompts)} English prompts from dataset")
+            print(f"Loaded {len(prompts)} English prompts from dataset")
             return prompts
             
         except Exception as e:
-            logging.error(f"Error loading dataset: {e}")
+            print(f"Error loading dataset: {e}")
             raise
     
     def load_checkpoint(self) -> Optional[ProcessingState]:
@@ -199,7 +188,7 @@ class DatasetProcessor:
                     data = json.load(f)
                     return ProcessingState(**data)
             except Exception as e:
-                logging.error(f"Error loading checkpoint: {e}")
+                print(f"Error loading checkpoint: {e}")
         return None
     
     def save_checkpoint(self, state: ProcessingState):
@@ -214,7 +203,7 @@ class DatasetProcessor:
                     'failed_prompts': state.failed_prompts
                 }, f)
         except Exception as e:
-            logging.error(f"Error saving checkpoint: {e}")
+            print(f"Error saving checkpoint: {e}")
     
     def calculate_eta(self, state: ProcessingState) -> str:
         """Calculate estimated time remaining"""
@@ -256,7 +245,7 @@ class DatasetProcessor:
                 }
                 results.append(result)
             else:
-                logging.warning(f"Failed to classify prompt {i} in batch {batch_num}")
+                print(f"Failed to classify prompt {i} in batch {batch_num}")
         
         return results
     
@@ -281,12 +270,12 @@ class DatasetProcessor:
         """Main processing loop"""
         # Test Ollama connection
         if not self.scorer.test_connection():
-            logging.error(f"Cannot connect to Ollama or model {MODEL_NAME} not found!")
-            logging.error("Please ensure Ollama is running and the model is installed:")
-            logging.error(f"  ollama pull {MODEL_NAME}")
+            print(f"Cannot connect to Ollama or model {MODEL_NAME} not found!")
+            print("Please ensure Ollama is running and the model is installed:")
+            print(f"  ollama pull {MODEL_NAME}")
             return
         
-        logging.info(f"Connected to Ollama with model: {MODEL_NAME}")
+        print(f"Connected to Ollama with model: {MODEL_NAME}")
         
         # Load dataset
         prompts = self.load_dataset()
@@ -295,10 +284,10 @@ class DatasetProcessor:
         state = self.load_checkpoint()
         
         if state:
-            logging.info(f"Resuming from checkpoint: {state.processed_count}/{state.total_prompts} processed")
+            print(f"Resuming from checkpoint: {state.processed_count}/{state.total_prompts} processed")
             start_batch = state.current_batch
         else:
-            logging.info("Starting fresh processing")
+            print("Starting fresh processing")
             state = ProcessingState(
                 total_prompts=len(prompts),
                 processed_count=0,
@@ -350,10 +339,10 @@ class DatasetProcessor:
                 time.sleep(0.1)
         
         except KeyboardInterrupt:
-            logging.info("Processing interrupted by user")
+            print("Processing interrupted by user")
             self.save_checkpoint(state)
         except Exception as e:
-            logging.error(f"Processing error: {e}")
+            print(f"Processing error: {e}")
             self.save_checkpoint(state)
             raise
         finally:
@@ -363,8 +352,8 @@ class DatasetProcessor:
         if state.processed_count >= len(prompts):
             if self.checkpoint_file.exists():
                 self.checkpoint_file.unlink()
-            logging.info(f"Processing completed! Results saved to {self.output_file}")
-            logging.info(f"Total prompts processed: {state.processed_count}")
+            print(f"Processing completed! Results saved to {self.output_file}")
+            print(f"Total prompts processed: {state.processed_count}")
 
 def main():
     """Main entry point"""
