@@ -121,7 +121,7 @@ func StreamOllamaResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 	// Create the request body
 	reqBody := OllamaRequest{
-		Model:  "gemma3",
+		Model:  "gemma3:4b",
 		Prompt: contextBuilder.String(),
 		Stream: true,
 		Options: map[string]interface{}{
