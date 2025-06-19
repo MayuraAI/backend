@@ -3,12 +3,11 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
-
-	"gateway/pkg/logger"
 )
 
 // DailyUsage represents daily usage tracking for a user/IP
@@ -32,15 +31,15 @@ type RateLimitConfig struct {
 	CleanupTTL      time.Duration // How long to keep inactive usage records
 }
 
-// Default rate limiting configuration
-var defaultConfig = RateLimitConfig{
-	RequestsPerDay:  10,             // 10 requests per day per user
-	CleanupInterval: 24 * time.Hour, // Clean up every 24 hours
-	CleanupTTL:      48 * time.Hour, // Remove usage records older than 48 hours
-}
-
-// Global rate limiter instance
-var globalRateLimiter *RateLimiter
+// Global instances
+var (
+	globalRateLimiter *RateLimiter
+	defaultConfig     = RateLimitConfig{
+		RequestsPerDay:  3,              // 10 requests per day per user
+		CleanupInterval: 1 * time.Hour,  // Clean up every hour
+		CleanupTTL:      24 * time.Hour, // Keep records for 24 hours
+	}
+)
 
 // Context keys for request type
 type contextKey string
@@ -57,7 +56,7 @@ const (
 	FreeRequest RequestType = "free"
 )
 
-// Initialize the rate limiter
+// init initializes the global rate limiter
 func init() {
 	globalRateLimiter = NewRateLimiter(defaultConfig)
 }
@@ -194,8 +193,6 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 	cfg := config
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log := logger.GetLogger("rate_limiter")
-
 		// Create rate limit key based on user ID (from auth) or IP address
 		key := getRateLimitKey(r)
 
@@ -211,6 +208,10 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		if remaining < 0 {
 			remaining = 0
 		}
+
+		// Log the request with basic info
+		log.Printf("[%s] %s %s - %s request (%d/%d used)",
+			key, r.Method, r.URL.Path, string(requestType), currentCount, cfg.RequestsPerDay)
 
 		// Add comprehensive rate limit headers
 		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
@@ -232,23 +233,12 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		}
 		w.Header().Set("X-RateLimit-Status", statusMessage)
 
-		// Log the request with comprehensive information
-		log.InfoWithFields("Request processed", map[string]interface{}{
-			"key":          key,
-			"request_type": string(requestType),
-			"count":        currentCount,
-			"remaining":    remaining,
-			"daily_limit":  cfg.RequestsPerDay,
-			"reset_time":   resetTime.Format(time.RFC3339),
-			"path":         r.URL.Path,
-			"status":       statusMessage,
-		})
-
 		// Add request type to context for the handler to use
 		ctx := context.WithValue(r.Context(), RequestTypeContextKey, requestType)
 
-		// Continue to next handler (we don't block any requests)
+		// Process the request
 		next.ServeHTTP(w, r.WithContext(ctx))
+
 	})
 }
 
