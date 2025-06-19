@@ -3,3 +3,6 @@ __pycache__/
 .pre-commit-config.yaml
 trufflehog/
 **/best_model/
+.DS_Store
+processing.log
+processing_checkpoint.json
