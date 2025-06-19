@@ -1,7 +1,6 @@
 """
 FastAPI server for prompt classification and routing.
 """
-import logging
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,9 +9,6 @@ from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
 
 from router.prompt_router import PromptRouter
-
-# Setup simple logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize FastAPI app
 app = FastAPI(

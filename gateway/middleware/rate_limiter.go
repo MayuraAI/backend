@@ -344,13 +344,7 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 			json.NewEncoder(w).Encode(response)
 
 			// Log the blocked request
-			log.WarnWithFields("Request blocked due to suspicious activity", map[string]interface{}{
-				"key":           key,
-				"path":          r.URL.Path,
-				"blocked_until": blockedUntil.Format(time.RFC3339),
-				"user_agent":    r.Header.Get("User-Agent"),
-				"ip":            r.RemoteAddr,
-			})
+			log.Printf("Request blocked due to suspicious activity from %s for path %s until %s", key, r.URL.Path, blockedUntil.Format(time.RFC3339))
 			return
 		}
 

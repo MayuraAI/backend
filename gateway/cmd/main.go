@@ -8,28 +8,19 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"syscall"
 	"time"
 
 	"gateway/handlers"
 	"gateway/middleware"
+
+	"github.com/joho/godotenv"
 )
 
 // getEnvWithDefault gets environment variable with default value
 func getEnvWithDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
-	}
-	return defaultValue
-}
-
-// getEnvIntWithDefault gets environment variable as int with default value
-func getEnvIntWithDefault(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
 	}
 	return defaultValue
 }
@@ -98,6 +89,14 @@ func setupRoutes() http.Handler {
 }
 
 func main() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Printf("Warning: Error loading .env file: %v", err)
+		log.Printf("Continuing with system environment variables...")
+	} else {
+		log.Printf("Successfully loaded .env file")
+	}
+
 	// Set maximum number of CPUs to use
 	maxProcs := runtime.GOMAXPROCS(0)
 	log.Printf("Gateway server initializing with %d CPU cores", maxProcs)
