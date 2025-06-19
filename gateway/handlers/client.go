@@ -43,6 +43,17 @@ type RateLimitStatus struct {
 	UserID            string                 `json:"user_id,omitempty"`
 	UserEmail         string                 `json:"user_email,omitempty"`
 	Message           string                 `json:"message"`
+
+	// Suspicious activity tracking
+	IsBlocked        bool      `json:"is_blocked"`
+	BlockedUntil     time.Time `json:"blocked_until,omitempty"`
+	BlockedUntilUnix int64     `json:"blocked_until_unix,omitempty"`
+	RecentRequests   int       `json:"recent_requests"` // Requests in last minute
+	SuspiciousConfig struct {
+		Threshold int    `json:"threshold"`
+		Window    string `json:"window"`
+		Duration  string `json:"block_duration"`
+	} `json:"suspicious_config"`
 }
 
 // Global metrics for monitoring
@@ -436,8 +447,12 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	usage := middleware.GetGlobalRateLimiter().GetOrCreateUsage(key)
 	currentCount, resetTime := usage.GetUsageInfo()
 
-	// Get the daily limit from default config
-	dailyLimit := middleware.GetDefaultConfig().RequestsPerDay
+	// Get blocking information
+	isBlocked, blockedUntil, recentRequests := usage.GetBlockingInfo()
+
+	// Get the configuration
+	config := middleware.GetDefaultConfig()
+	dailyLimit := config.RequestsPerDay
 
 	// Calculate remaining requests
 	remaining := dailyLimit - currentCount
@@ -445,11 +460,14 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		remaining = 0
 	}
 
-	// Determine current mode
+	// Determine current mode and message
 	var currentMode middleware.RequestType
 	var message string
 
-	if currentCount < dailyLimit {
+	if isBlocked {
+		currentMode = middleware.FreeRequest
+		message = fmt.Sprintf("Your account is temporarily blocked due to suspicious activity until %s", blockedUntil.Format("15:04:05"))
+	} else if currentCount < dailyLimit {
 		currentMode = middleware.ProRequest
 		if remaining == 1 {
 			message = "You have 1 pro request remaining today"
@@ -470,7 +488,20 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		ResetTime:         resetTime,
 		ResetTimeUnix:     resetTime.Unix(),
 		Message:           message,
+		IsBlocked:         isBlocked,
+		RecentRequests:    recentRequests,
 	}
+
+	// Add blocking information if blocked
+	if isBlocked {
+		status.BlockedUntil = blockedUntil
+		status.BlockedUntilUnix = blockedUntil.Unix()
+	}
+
+	// Add suspicious activity configuration
+	status.SuspiciousConfig.Threshold = config.SuspiciousThreshold
+	status.SuspiciousConfig.Window = config.SuspiciousWindow.String()
+	status.SuspiciousConfig.Duration = config.BlockDuration.String()
 
 	// Add user info if authenticated
 	if userOk && user != nil {
