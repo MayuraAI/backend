@@ -19,46 +19,382 @@ model:
   batch_size: 32
   name: "distilbert-base-uncased"
 
-# Dynamic weights based on task importance:
-# Critical tasks (math, coding, reasoning): quality=0.9, cost=0.1
-# Medium tasks (translation, writing): quality=0.6, cost=0.4  
-# Casual tasks (conversation, roleplay): quality=0.2, cost=0.8
 weights:
-  quality: 0.7
-  cost: 0.3
+  quality: 0.6
+  cost: 0.4
 
 model_scores:
   models:
-    gemma3:
-      cost_per_request: 0.001
-      conversation: 0.88
-      classification: 0.85
-      roleplay: 0.87
-      data_analysis: 0.83
-      translation: 0.89
-      problem_solving: 0.86
-      reasoning: 0.87
-      code_generation: 0.88
-      writing: 0.86
-      summarization: 0.87
-      math: 0.85
-      creative: 0.86
-      research: 0.84
-      extraction: 0.85
-      
+    gemini-2.5-flash-preview:
+      provider: "gemini"
+      provider_model_name: "gemini-2.5-flash-preview-04-17"
+      display_name: "Gemini 2.5 Flash Preview"
+      tier: "pro"
+      cost_per_request: 0.15
+      is_default: false
+      conversation: 0.980
+      classification: 0.950
+      roleplay: 0.970
+      data_analysis: 0.970
+      translation: 0.940
+      problem_solving: 0.990
+      reasoning: 0.990
+      code_generation: 0.970
+      writing: 0.970
+      summarization: 0.960
+      math: 0.990
+      creative: 0.970
+      research: 0.980
+      extraction: 0.960
+
+    gemini-2.5-pro-preview:
+      provider: "gemini"
+      provider_model_name: "gemini-2.5-pro-preview-05-20"
+      display_name: "Gemini 2.5 Pro Preview"
+      tier: "pro"
+      cost_per_request: 0.02
+      is_default: false
+      conversation: 0.980
+      classification: 0.960
+      roleplay: 0.970
+      data_analysis: 0.970
+      translation: 0.940
+      problem_solving: 0.990
+      reasoning: 0.990
+      code_generation: 0.970
+      writing: 0.980
+      summarization: 0.960
+      math: 0.990
+      creative: 0.970
+      research: 0.980
+      extraction: 0.970
+
     gemini-2.0-flash:
+      provider: "gemini"
+      provider_model_name: "gemini-2.0-flash"
+      display_name: "Gemini 2.0 Flash"
+      tier: "pro"
       cost_per_request: 0.01
-      conversation: 0.95
-      classification: 0.90
-      roleplay: 0.95
-      data_analysis: 0.92
-      translation: 0.88
-      problem_solving: 0.95
-      reasoning: 0.96
-      code_generation: 0.94
-      writing: 0.93
-      summarization: 0.91
-      math: 0.94
-      creative: 0.92
-      research: 0.93
-      extraction: 0.90
+      is_default: true
+      conversation: 0.960
+      classification: 0.910
+      roleplay: 0.960
+      data_analysis: 0.950
+      translation: 0.900
+      problem_solving: 0.970
+      reasoning: 0.980
+      code_generation: 0.960
+      writing: 0.940
+      summarization: 0.920
+      math: 0.980
+      creative: 0.940
+      research: 0.950
+      extraction: 0.920
+
+    gemini-2.0-flash-lite:
+      provider: "gemini"
+      provider_model_name: "gemini-2.0-flash-lite"
+      display_name: "Gemini 2.0 Flash Lite"
+      tier: "pro"
+      cost_per_request: 0.008
+      is_default: false
+      conversation: 0.950
+      classification: 0.880
+      roleplay: 0.950
+      data_analysis: 0.940
+      translation: 0.880
+      problem_solving: 0.970
+      reasoning: 0.980
+      code_generation: 0.960
+      writing: 0.940
+      summarization: 0.920
+      math: 0.980
+      creative: 0.940
+      research: 0.950
+      extraction: 0.910
+
+    gemini-1.5-flash:
+      provider: "gemini"
+      provider_model_name: "gemini-1.5-flash"
+      display_name: "Gemini 1.5 Flash"
+      tier: "pro"
+      cost_per_request: 0.008
+      is_default: false
+      conversation: 0.920
+      classification: 0.890
+      roleplay: 0.910
+      data_analysis: 0.900
+      translation: 0.850
+      problem_solving: 0.930
+      reasoning: 0.950
+      code_generation: 0.880
+      writing: 0.870
+      summarization: 0.880
+      math: 0.950
+      creative: 0.870
+      research: 0.880
+      extraction: 0.860
+
+    gemini-1.5-pro:
+      provider: "gemini"
+      provider_model_name: "gemini-1.5-pro"
+      display_name: "Gemini 1.5 Pro"
+      tier: "pro"
+      cost_per_request: 0.01
+      is_default: false
+      conversation: 0.960
+      classification: 0.910
+      roleplay: 0.960
+      data_analysis: 0.930
+      translation: 0.880
+      problem_solving: 0.950
+      reasoning: 0.970
+      code_generation: 0.940
+      writing: 0.930
+      summarization: 0.910
+      math: 0.950
+      creative: 0.920
+      research: 0.940
+      extraction: 0.900
+
+    kimi-dev-72b:
+      provider: "openrouter"
+      provider_model_name: "moonshotai/kimi-dev-72b:free"
+      display_name: "Kimi Dev 72B"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.930
+      classification: 0.880
+      roleplay: 0.900
+      data_analysis: 0.890
+      translation: 0.930
+      problem_solving: 0.920
+      reasoning: 0.900
+      code_generation: 0.940
+      writing: 0.920
+      summarization: 0.900
+      math: 0.890
+      creative: 0.890
+      research: 0.900
+      extraction: 0.900
+
+    sarvam-m:
+      provider: "openrouter"
+      provider_model_name: "sarvamai/sarvam-m:free"
+      display_name: "Sarvam M"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.920
+      classification: 0.850
+      roleplay: 0.880
+      data_analysis: 0.870
+      translation: 0.890
+      problem_solving: 0.900
+      reasoning: 0.920
+      code_generation: 0.900
+      writing: 0.880
+      summarization: 0.870
+      math: 0.960
+      creative: 0.900
+      research: 0.880
+      extraction: 0.850
+
+    devstral-small:
+      provider: "openrouter"
+      provider_model_name: "mistralai/devstral-small:free"
+      display_name: "Devstral Small"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.860
+      classification: 0.840
+      roleplay: 0.850
+      data_analysis: 0.830
+      translation: 0.870
+      problem_solving: 0.850
+      reasoning: 0.840
+      code_generation: 0.900
+      writing: 0.850
+      summarization: 0.840
+      math: 0.830
+      creative: 0.840
+      research: 0.840
+      extraction: 0.830
+
+    # llama-3.3-nemotron-super:
+    #   provider: "openrouter"
+    #   provider_model_name: "nvidia/llama-3.3-nemotron-super-49b-v1:free"
+    #   display_name: "Llama 3.3 Nemotron Super 49B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   conversation: 0.940
+    #   classification: 0.900
+    #   roleplay: 0.920
+    #   data_analysis: 0.920
+    #   translation: 0.930
+    #   problem_solving: 0.930
+    #   reasoning: 0.940
+    #   code_generation: 0.950
+    #   writing: 0.930
+    #   summarization: 0.920
+    #   math: 0.940
+    #   creative: 0.920
+    #   research: 0.920
+    #   extraction: 0.900
+
+    llama-4-maverick:
+      provider: "openrouter"
+      provider_model_name: "meta-llama/llama-4-maverick:free"
+      display_name: "Llama 4 Maverick"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.890
+      classification: 0.860
+      roleplay: 0.880
+      data_analysis: 0.840
+      translation: 0.900
+      problem_solving: 0.870
+      reasoning: 0.880
+      code_generation: 0.920
+      writing: 0.870
+      summarization: 0.880
+      math: 0.860
+      creative: 0.870
+      research: 0.850
+      extraction: 0.870
+
+    llama-4-scout:
+      provider: "openrouter"
+      provider_model_name: "meta-llama/llama-4-scout:free"
+      display_name: "Llama 4 Scout"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.880
+      classification: 0.850
+      roleplay: 0.870
+      data_analysis: 0.840
+      translation: 0.900
+      problem_solving: 0.870
+      reasoning: 0.880
+      code_generation: 0.910
+      writing: 0.870
+      summarization: 0.880
+      math: 0.860
+      creative: 0.870
+      research: 0.850
+      extraction: 0.860
+
+    gemma2-9b-it:
+      provider: "groq"
+      provider_model_name: "gemma2-9b-it"
+      display_name: "Gemma 2 9B IT"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.880
+      classification: 0.850
+      roleplay: 0.870
+      data_analysis: 0.830
+      translation: 0.890
+      problem_solving: 0.860
+      reasoning: 0.870
+      code_generation: 0.900
+      writing: 0.860
+      summarization: 0.870
+      math: 0.850
+      creative: 0.860
+      research: 0.840
+      extraction: 0.850
+
+    llama-3.1-8b:
+      provider: "groq"
+      provider_model_name: "llama-3.1-8b-instant"
+      display_name: "Llama 3.1 8B"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: true
+      conversation: 0.890
+      classification: 0.860
+      roleplay: 0.880
+      data_analysis: 0.840
+      translation: 0.900
+      problem_solving: 0.870
+      reasoning: 0.880
+      code_generation: 0.950
+      writing: 0.870
+      summarization: 0.880
+      math: 0.860
+      creative: 0.870
+      research: 0.850
+      extraction: 0.860
+
+    llama-3.3-70b-versatile:
+      provider: "groq"
+      provider_model_name: "llama-3.3-70b-versatile"
+      display_name: "Llama 3.3 70B Versatile"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.920
+      classification: 0.890
+      roleplay: 0.910
+      data_analysis: 0.880
+      translation: 0.930
+      problem_solving: 0.900
+      reasoning: 0.910
+      code_generation: 0.940
+      writing: 0.900
+      summarization: 0.910
+      math: 0.890
+      creative: 0.890
+      research: 0.880
+      extraction: 0.880
+
+    llama3-70b-8192:
+      provider: "groq"
+      provider_model_name: "llama3-70b-8192"
+      display_name: "Llama 3 70B"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: true
+      conversation: 0.910
+      classification: 0.880
+      roleplay: 0.900
+      data_analysis: 0.870
+      translation: 0.920
+      problem_solving: 0.890
+      reasoning: 0.900
+      code_generation: 0.930
+      writing: 0.890
+      summarization: 0.900
+      math: 0.880
+      creative: 0.880
+      research: 0.870
+      extraction: 0.870
+
+    llama3-8b-8192:
+      provider: "groq"
+      provider_model_name: "llama3-8b-8192"
+      display_name: "Llama 3 8B"
+      tier: "free"
+      cost_per_request: 0.0
+      is_default: false
+      conversation: 0.870
+      classification: 0.840
+      roleplay: 0.860
+      data_analysis: 0.820
+      translation: 0.880
+      problem_solving: 0.850
+      reasoning: 0.860
+      code_generation: 0.900
+      writing: 0.850
+      summarization: 0.860
+      math: 0.840
+      creative: 0.850
+      research: 0.830
+      extraction: 0.840

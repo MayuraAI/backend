@@ -2,7 +2,7 @@
 Prompt router that selects the best model based on classification results.
 """
 import time
-from typing import Dict, Tuple, Any, Optional
+from typing import Dict, Tuple, Any, Optional, List
 from pathlib import Path
 import sys
 
@@ -12,9 +12,6 @@ if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
 from router.model import PromptClassifier
-from router.logging_config import get_logger, log_performance
-
-logger = get_logger(__name__)
 
 class PromptRouter:
     def __init__(self, config_path: str = "config/config.yaml"):
@@ -33,6 +30,18 @@ class PromptRouter:
         self.quality_weight = self.config['weights']['quality']
         self.cost_weight = self.config['weights']['cost']
         self.model_scores = self.config['model_scores']['models']
+        self.model_display_name_map = {}
+        
+        # Find default model
+        self.default_model = None
+        for model_name, model_data in self.model_scores.items():
+            self.model_display_name_map[model_name] = model_data.get('display_name', model_name)
+            if model_data.get('is_default', False):
+                self.default_model = model_name
+                break
+        
+        if not self.default_model:
+            print("Warning: No default model found in config")
         
         # Define task importance levels
         self.task_importance = {
@@ -62,7 +71,7 @@ class PromptRouter:
         current_time = time.time()
         if current_time - self._last_config_check > self._config_check_interval:
             if self.config_path.stat().st_mtime > self._last_config_check:
-                logger.info("Config file changed, reloading")
+                print("Config file changed, reloading")
                 self._load_config()
             self._last_config_check = current_time
 
@@ -102,18 +111,31 @@ class PromptRouter:
             quality_weight = 0.2
             cost_weight = 0.8
         
-        logger.debug("Dynamic weights calculated", extra_fields={
-            'importance_score': round(importance_score, 3),
-            'quality_weight': quality_weight,
-            'cost_weight': cost_weight
-        })
         return quality_weight, cost_weight
 
-    def _calculate_model_scores(self, category_probs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+    def _filter_models_by_tier(self, request_type: str) -> Dict[str, Dict[str, Any]]:
+        """Filter models based on request type (pro/free)."""
+        filtered_models = {}
+        
+        for model_name, model_data in self.model_scores.items():
+            model_tier = model_data.get('tier', 'free')
+            
+            if request_type == 'pro':
+                # Pro users get access to both pro and free models
+                if model_tier == 'pro':
+                    filtered_models[model_name] = model_data
+            elif request_type == 'free':
+                # Free users only get free models
+                if model_tier == 'free':
+                    filtered_models[model_name] = model_data
+        
+        return filtered_models
+
+    def _calculate_model_scores(self, category_probs: Dict[str, float], filtered_models: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
         """Calculate scores for each model based on category probabilities."""
         model_scores = {}
         
-        for model_name, model_data in self.model_scores.items():
+        for model_name, model_data in filtered_models.items():
             # Get base cost
             cost = model_data.get('cost_per_request', 0)
             
@@ -126,7 +148,11 @@ class PromptRouter:
             # Store scores
             model_scores[model_name] = {
                 'quality_score': quality_score,
-                'cost': cost
+                'cost': cost,
+                'tier': model_data.get('tier', 'free'),
+                'provider': model_data.get('provider', 'unknown'),
+                'display_name': model_data.get('display_name', model_name),
+                'provider_model_name': model_data.get('provider_model_name', model_name)
             }
             
         return model_scores
@@ -165,103 +191,97 @@ class PromptRouter:
                 'normalized_quality': norm_quality,
                 'cost': scores['cost'],
                 'normalized_cost': norm_cost,
-                'final_score': final_score
+                'final_score': final_score,
+                'tier': scores['tier'],
+                'provider': scores['provider'],
+                'display_name': scores['display_name'],
+                'provider_model_name': scores['provider_model_name']
             }
             
         return normalized_scores
 
     def _apply_simple_prompt_rules(self, prompt: str) -> Optional[Tuple[str, Dict[str, float]]]:
-        """Apply simple rules for obvious prompt types to avoid misclassification."""
+        """Apply simple heuristic rules for certain prompt patterns."""
+        prompt_lower = prompt.lower()
         
-        prompt_lower = prompt.lower().strip()
+        # Math and calculation patterns
+        if any(keyword in prompt_lower for keyword in ['calculate', 'solve', 'math', 'equation', '=', '+', '-', '*', '/', 'derivative', 'integral']):
+            return 'math', {'math': 0.95, 'reasoning': 0.05}
         
-        # Simple greetings and casual conversation starters
-        simple_greetings = [
-            'hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening',
-            'how are you', 'whats up', "what's up", 'howdy', 'greetings',
-            'nice to meet you', 'pleased to meet you'
-        ]
+        # Code generation patterns
+        if any(keyword in prompt_lower for keyword in ['code', 'function', 'class', 'import', 'def ', 'return', 'print(', 'console.log', 'var ', 'let ', 'const ']):
+            return 'code_generation', {'code_generation': 0.9, 'problem_solving': 0.1}
         
-        # Check if it's a simple greeting (should be conversation)
-        if any(greeting in prompt_lower for greeting in simple_greetings):
-            return 'conversation', {'conversation': 0.95, 'roleplay': 0.05}
-        
-        # Simple math expressions (should be math)
-        import re
-        if re.match(r'^[0-9+\-*/().\s=x^]+$', prompt_lower):
-            return 'math', {'math': 0.90, 'problem_solving': 0.10}
-        
-        # Code keywords (should be code_generation) - be more specific
-        code_keywords = ['def ', 'class ', 'import ', 'function ', 'console.log', '#!/', 'return ', 'if __name__']
-        if any(keyword in prompt_lower for keyword in code_keywords):
-            return 'code_generation', {'code_generation': 0.85, 'problem_solving': 0.15}
-        
-        # More specific code patterns
-        if ('print(' in prompt_lower and any(char in prompt_lower for char in ['(', ')', '"', "'"])):
-            return 'code_generation', {'code_generation': 0.85, 'problem_solving': 0.15}
+        # Research patterns
+        if any(keyword in prompt_lower for keyword in ['research', 'study', 'analyze', 'compare', 'investigate', 'literature']):
+            return 'research', {'research': 0.8, 'writing': 0.2}
         
         return None
 
-    @log_performance("route_prompt", 50.0)
-    async def route_prompt(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
-        """
-        Route a prompt to the best model.
-        
-        Returns:
-            Tuple of (best_model, metadata)
-        """
-        start_time = time.time()
+    async def route_prompt(self, prompt: str, request_type: str = "free") -> Dict[str, Any]:
+        """Route a prompt to the most appropriate models."""
         
         # Check if config needs reloading
         self._check_config_reload()
         
-        # First, try simple rules for obvious cases
+        # Filter models by tier
+        filtered_models = self._filter_models_by_tier(request_type)
+        
+        if not filtered_models:
+            print(f"Warning: No models available for request type: {request_type}")
+            # Fallback to default model if available
+            if self.default_model and self.default_model in self.model_scores:
+                filtered_models = {self.default_model: self.model_scores[self.default_model]}
+            else:
+                # Use first available model as last resort
+                filtered_models = {list(self.model_scores.keys())[0]: list(self.model_scores.values())[0]}
+        
+        # Try simple rules first
         simple_result = self._apply_simple_prompt_rules(prompt)
         if simple_result:
-            category, category_probs = simple_result
-            logger.debug("Applied simple rule", extra_fields={
-                'prompt_preview': prompt[:50],
-                'predicted_category': category,
-                'rule_type': 'simple'
-            })
+            predicted_category, category_probs = simple_result
         else:
-            # Get category probabilities from ML model
-            category, category_probs = self.classifier.predict(prompt)
-            logger.debug("ML classification completed", extra_fields={
-                'predicted_category': category,
-                'top_probability': max(category_probs.values()),
-                'rule_type': 'ml'
-            })
+            # Use ML classification
+            category_probs = await self.classifier.classify_prompt(prompt)
+            predicted_category = max(category_probs, key=category_probs.get)
         
         # Get dynamic weights based on task importance
         quality_weight, cost_weight = self._get_dynamic_weights(category_probs)
         
         # Calculate model scores
-        model_scores = self._calculate_model_scores(category_probs)
+        model_scores = self._calculate_model_scores(category_probs, filtered_models)
         normalized_scores = self._normalize_scores(model_scores, quality_weight, cost_weight)
         
-        # Find best model
-        best_model = max(normalized_scores.items(), key=lambda x: x[1]['final_score'])[0]
+        # Sort models by final score (descending)
+        sorted_models = sorted(
+            normalized_scores.items(),
+            key=lambda x: x[1]['final_score'],
+            reverse=True
+        )
         
-        # Prepare metadata
+        # Select top models
+        primary_model = sorted_models[0][0] if sorted_models else self.default_model
+        secondary_model = sorted_models[1][0] if len(sorted_models) > 1 else primary_model
+        
+        # Metadata
         metadata = {
-            'processing_time': time.time() - start_time,
-            'predicted_category': category,
+            'predicted_category': predicted_category,
+            'confidence': max(category_probs.values()),
             'category_probabilities': category_probs,
+            'quality_weight': quality_weight,
+            'cost_weight': cost_weight,
             'model_scores': normalized_scores,
-            'selected_model': best_model,
-            'confidence': normalized_scores[best_model]['final_score'],
-            'dynamic_weights': {
-                'quality_weight': quality_weight,
-                'cost_weight': cost_weight
-            }
+            'classification_method': 'rule_based' if simple_result else 'ml_classification'
         }
         
-        logger.info("Prompt routing completed", extra_fields={
-            'selected_model': best_model,
-            'predicted_category': category,
-            'confidence': round(metadata['confidence'], 3),
-            'processing_time_ms': round(metadata['processing_time'] * 1000, 2)
-        })
+        print(f"Routing completed - Category: {predicted_category}, Primary: {primary_model}, Secondary: {secondary_model}")
         
-        return best_model, metadata
+        return {
+            'primary_model': primary_model,
+            'primary_model_display_name': normalized_scores[primary_model]['display_name'],
+            'secondary_model': secondary_model,
+            'secondary_model_display_name': normalized_scores[secondary_model]['display_name'],
+            'default_model': self.default_model,
+            'default_model_display_name': self.model_display_name_map.get(self.default_model, self.default_model),
+            'metadata': metadata
+        }

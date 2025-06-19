@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"gateway/models"
-	"gateway/pkg/logger"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -117,7 +117,7 @@ func getGeminiConfig() (apiKey, modelName, baseURL string) {
 }
 
 // StreamGeminiResponse calls Gemini API and streams the response with optimizations
-func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
+func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string) error {
 	// Initialize optimized client
 	initGeminiClient()
 
@@ -142,9 +142,6 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	finalSystemPrompt := systemPrompt
 	if profileContext != "" {
 		finalSystemPrompt += "\n\nUser Profile Context:\n" + profileContext
-	}
-	if workspaceInstructions != "" {
-		finalSystemPrompt += "\n\nWorkspace Instructions:\n" + workspaceInstructions
 	}
 
 	// Add previous messages (up to the last 4)
@@ -243,6 +240,19 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		return fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// API request succeeded - now send start chunk with model display name
+	startResponse := models.Response{
+		Message: displayName,
+		Type:    "start",
+		Model:   displayName,
+	}
+
+	startMsg, err := models.FormatSSEMessage(startResponse)
+	if err == nil {
+		fmt.Fprint(w, startMsg)
+		flusher.Flush()
+	}
+
 	// Stream processing with optimized buffering
 	scanner := bufio.NewScanner(resp.Body)
 
@@ -251,7 +261,6 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	scanner.Buffer(buf, 64*1024)
 
 	chunkCount := 0
-	firstChunkTime := time.Time{}
 	var fullResponse strings.Builder
 
 	for scanner.Scan() {
@@ -275,10 +284,6 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 			continue
 		}
 
-		// Track first chunk timing
-		if chunkCount == 0 {
-			firstChunkTime = time.Now()
-		}
 		chunkCount++
 
 		// Extract the response part
@@ -327,11 +332,6 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 		// Check if done
 		if isFinal {
-			totalTime := time.Since(startTime)
-			timeToFirst := firstChunkTime.Sub(startTime)
-
-			// Log performance metrics
-			logGeminiStreamingMetrics(modelName, chunkCount, timeToFirst, totalTime, fullResponse.Len())
 			break
 		}
 	}
@@ -350,32 +350,9 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	fmt.Fprint(w, msg)
 	flusher.Flush()
 
-	streamTime := time.Since(startTime)
-	streamLogger := logger.GetLogger("stream")
-	streamLogger.InfoWithFieldsCtx(ctx, "Gemini streaming completed", map[string]interface{}{
-		"client_id":     clientID,
-		"chunk_count":   chunkCount,
-		"stream_time_s": streamTime.Seconds(),
-		"model":         model,
-	})
+	log.Printf("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
 
 	return nil
-}
-
-// logGeminiStreamingMetrics logs performance metrics for monitoring
-func logGeminiStreamingMetrics(model string, chunks int, timeToFirst, totalTime time.Duration, responseLength int) {
-	avgChunkTime := float64(totalTime.Milliseconds()) / float64(chunks)
-
-	log := logger.GetLogger("gemini.metrics")
-	log.InfoWithFields("Gemini streaming metrics", map[string]interface{}{
-		"model":                     model,
-		"chunks":                    chunks,
-		"response_length":           responseLength,
-		"time_to_first_ms":          timeToFirst.Milliseconds(),
-		"total_time_s":              totalTime.Seconds(),
-		"avg_chunk_time_ms":         avgChunkTime,
-		"throughput_chunks_per_sec": float64(chunks) / totalTime.Seconds(),
-	})
 }
 
 // CallGeminiAPI calls Gemini API for non-streaming response
