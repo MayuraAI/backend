@@ -54,6 +54,7 @@ type ModelScore struct {
 	Provider          string  `json:"provider"`
 	DisplayName       string  `json:"display_name"`
 	ProviderModelName string  `json:"provider_model_name"`
+	IsThinkingModel   bool    `json:"is_thinking_model"`
 }
 
 // Circuit breaker states

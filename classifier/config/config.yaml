@@ -32,6 +32,7 @@ model_scores:
       tier: "pro"
       cost_per_request: 0.15
       is_default: false
+      is_thinking_model: false
       conversation: 0.980
       classification: 0.950
       roleplay: 0.970
@@ -49,11 +50,12 @@ model_scores:
 
     gemini-2.5-pro-preview:
       provider: "gemini"
-      provider_model_name: "gemini-2.5-pro-preview-05-20"
+      provider_model_name: "gemini-2.5-pro-preview-06-05"
       display_name: "Gemini 2.5 Pro Preview"
       tier: "pro"
       cost_per_request: 0.02
       is_default: false
+      is_thinking_model: true
       conversation: 0.980
       classification: 0.960
       roleplay: 0.970
@@ -76,6 +78,7 @@ model_scores:
       tier: "pro"
       cost_per_request: 0.01
       is_default: true
+      is_thinking_model: false
       conversation: 0.960
       classification: 0.910
       roleplay: 0.960
@@ -98,6 +101,7 @@ model_scores:
       tier: "pro"
       cost_per_request: 0.008
       is_default: false
+      is_thinking_model: false
       conversation: 0.950
       classification: 0.880
       roleplay: 0.950
@@ -120,6 +124,7 @@ model_scores:
       tier: "pro"
       cost_per_request: 0.008
       is_default: false
+      is_thinking_model: false
       conversation: 0.920
       classification: 0.890
       roleplay: 0.910
@@ -142,6 +147,7 @@ model_scores:
       tier: "pro"
       cost_per_request: 0.01
       is_default: false
+      is_thinking_model: false
       conversation: 0.960
       classification: 0.910
       roleplay: 0.960
@@ -164,6 +170,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: true
       conversation: 0.930
       classification: 0.880
       roleplay: 0.900
@@ -179,49 +186,53 @@ model_scores:
       research: 0.900
       extraction: 0.900
 
-    sarvam-m:
-      provider: "openrouter"
-      provider_model_name: "sarvamai/sarvam-m:free"
-      display_name: "Sarvam M"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      conversation: 0.920
-      classification: 0.850
-      roleplay: 0.880
-      data_analysis: 0.870
-      translation: 0.890
-      problem_solving: 0.900
-      reasoning: 0.920
-      code_generation: 0.900
-      writing: 0.880
-      summarization: 0.870
-      math: 0.960
-      creative: 0.900
-      research: 0.880
-      extraction: 0.850
+    # NOT WORKING
+    # sarvam-m:
+    #   provider: "openrouter"
+    #   provider_model_name: "sarvamai/sarvam-m:free"
+    #   display_name: "Sarvam M"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.920
+    #   classification: 0.850
+    #   roleplay: 0.880
+    #   data_analysis: 0.870
+    #   translation: 0.890
+    #   problem_solving: 0.900
+    #   reasoning: 0.920
+    #   code_generation: 0.900
+    #   writing: 0.880
+    #   summarization: 0.870
+    #   math: 0.960
+    #   creative: 0.900
+    #   research: 0.880
+    #   extraction: 0.850
 
-    devstral-small:
-      provider: "openrouter"
-      provider_model_name: "mistralai/devstral-small:free"
-      display_name: "Devstral Small"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      conversation: 0.860
-      classification: 0.840
-      roleplay: 0.850
-      data_analysis: 0.830
-      translation: 0.870
-      problem_solving: 0.850
-      reasoning: 0.840
-      code_generation: 0.900
-      writing: 0.850
-      summarization: 0.840
-      math: 0.830
-      creative: 0.840
-      research: 0.840
-      extraction: 0.830
+    # NOT WORKING
+    # devstral-small:
+    #   provider: "openrouter"
+    #   provider_model_name: "mistralai/devstral-small:free"
+    #   display_name: "Devstral Small"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.860
+    #   classification: 0.840
+    #   roleplay: 0.850
+    #   data_analysis: 0.830
+    #   translation: 0.870
+    #   problem_solving: 0.850
+    #   reasoning: 0.840
+    #   code_generation: 0.900
+    #   writing: 0.850
+    #   summarization: 0.840
+    #   math: 0.830
+    #   creative: 0.840
+    #   research: 0.840
+    #   extraction: 0.830
 
     # llama-3.3-nemotron-super:
     #   provider: "openrouter"
@@ -230,6 +241,7 @@ model_scores:
     #   tier: "free"
     #   cost_per_request: 0.0
     #   is_default: false
+    #   is_thinking_model: false
     #   conversation: 0.940
     #   classification: 0.900
     #   roleplay: 0.920
@@ -252,6 +264,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: false
       conversation: 0.890
       classification: 0.860
       roleplay: 0.880
@@ -274,6 +287,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: false
       conversation: 0.880
       classification: 0.850
       roleplay: 0.870
@@ -296,6 +310,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: false
       conversation: 0.880
       classification: 0.850
       roleplay: 0.870
@@ -318,6 +333,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: true
+      is_thinking_model: false
       conversation: 0.890
       classification: 0.860
       roleplay: 0.880
@@ -340,6 +356,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: false
       conversation: 0.920
       classification: 0.890
       roleplay: 0.910
@@ -362,6 +379,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: true
+      is_thinking_model: false
       conversation: 0.910
       classification: 0.880
       roleplay: 0.900
@@ -384,6 +402,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
+      is_thinking_model: false
       conversation: 0.870
       classification: 0.840
       roleplay: 0.860

@@ -12,7 +12,7 @@ if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
 from router.model import PromptClassifier
-
+# i = 0
 class PromptRouter:
     def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the prompt router."""
@@ -152,7 +152,8 @@ class PromptRouter:
                 'tier': model_data.get('tier', 'free'),
                 'provider': model_data.get('provider', 'unknown'),
                 'display_name': model_data.get('display_name', model_name),
-                'provider_model_name': model_data.get('provider_model_name', model_name)
+                'provider_model_name': model_data.get('provider_model_name', model_name),
+                'is_thinking_model': model_data.get('is_thinking_model', False)
             }
             
         return model_scores
@@ -195,7 +196,8 @@ class PromptRouter:
                 'tier': scores['tier'],
                 'provider': scores['provider'],
                 'display_name': scores['display_name'],
-                'provider_model_name': scores['provider_model_name']
+                'provider_model_name': scores['provider_model_name'],
+                'is_thinking_model': scores['is_thinking_model']
             }
             
         return normalized_scores
@@ -222,11 +224,87 @@ class PromptRouter:
         """Route a prompt to the most appropriate models."""
         
         # Check if config needs reloading
-        self._check_config_reload()
+        # self._check_config_reload()
         
         # Filter models by tier
         filtered_models = self._filter_models_by_tier(request_type)
+
         
+        # # Handle empty filtered_models before cycling
+        # if not filtered_models:
+        #     print(f"Warning: No models available for request type: {request_type}")
+        #     # Fallback to default model if available
+        #     if self.default_model and self.default_model in self.model_scores:
+        #         filtered_models = {self.default_model: self.model_scores[self.default_model]}
+        #     else:
+        #         # Use first available model as last resort
+        #         filtered_models = {list(self.model_scores.keys())[0]: list(self.model_scores.values())[0]}
+
+        # # TEMPORARY: Cycle through models for testing
+        # global i
+        # i += 1
+        # i = i % len(filtered_models)
+        
+        # # Get secondary model index with proper cycling
+        # secondary_i = (i + 1) % len(filtered_models)
+        
+        # return {
+        #     'primary_model': list(filtered_models.keys())[i],
+        #     'primary_model_display_name': filtered_models[list(filtered_models.keys())[i]]['display_name'],
+        #     'secondary_model': list(filtered_models.keys())[secondary_i],
+        #     'secondary_model_display_name': filtered_models[list(filtered_models.keys())[secondary_i]]['display_name'],
+        #     'default_model': self.default_model,
+        #     'default_model_display_name': self.model_display_name_map.get(self.default_model, self.default_model),
+        #     'metadata': {
+        #         'predicted_category': 'research',
+        #         'confidence': 0.8,
+        #         'category_probabilities': {'research': 0.8, 'writing': 0.2},
+        #         'quality_weight': 0.6,
+        #         'cost_weight': 0.4,
+        #         'model_scores': {
+        #             list(filtered_models.keys())[i]: {
+        #                 'quality_score': 0.8,
+        #                 'normalized_quality': 0.8,
+        #                 'cost': 0.0,
+        #                 'normalized_cost': 0.0,
+        #                 'final_score': 0.8,
+        #                 'tier': filtered_models[list(filtered_models.keys())[i]].get('tier', 'free'),
+        #                 'provider': filtered_models[list(filtered_models.keys())[i]].get('provider', 'unknown'),
+        #                 'display_name': filtered_models[list(filtered_models.keys())[i]].get('display_name', list(filtered_models.keys())[i]),
+        #                 'provider_model_name': filtered_models[list(filtered_models.keys())[i]].get('provider_model_name', list(filtered_models.keys())[i]),
+        #                 'is_thinking_model': filtered_models[list(filtered_models.keys())[i]].get('is_thinking_model', False),
+        #             },
+        #             list(filtered_models.keys())[secondary_i]: {
+        #                 'quality_score': 0.8,
+        #                 'normalized_quality': 0.8,
+        #                 'cost': 0.0,
+        #                 'normalized_cost': 0.0,
+        #                 'final_score': 0.8,
+        #                 'tier': filtered_models[list(filtered_models.keys())[secondary_i]].get('tier', 'free'),
+        #                 'provider': filtered_models[list(filtered_models.keys())[secondary_i]].get('provider', 'unknown'),
+        #                 'display_name': filtered_models[list(filtered_models.keys())[secondary_i]].get('display_name', list(filtered_models.keys())[secondary_i]),
+        #                 'provider_model_name': filtered_models[list(filtered_models.keys())[secondary_i]].get('provider_model_name', list(filtered_models.keys())[secondary_i]),
+        #                 'is_thinking_model': filtered_models[list(filtered_models.keys())[secondary_i]].get('is_thinking_model', False),
+        #             },
+        #             self.default_model: {
+        #                 'quality_score': 0.8,
+        #                 'normalized_quality': 0.8,
+        #                 'cost': 0.0,
+        #                 'normalized_cost': 0.0,
+        #                 'final_score': 0.8,
+        #                 'tier': self.model_scores.get(self.default_model, {}).get('tier', 'free'),
+        #                 'provider': self.model_scores.get(self.default_model, {}).get('provider', 'unknown'),
+        #                 'display_name': self.model_scores.get(self.default_model, {}).get('display_name', self.default_model),
+        #                 'provider_model_name': self.model_scores.get(self.default_model, {}).get('provider_model_name', self.default_model),
+        #                 'is_thinking_model': self.model_scores.get(self.default_model, {}).get('is_thinking_model', False),
+        #             }
+        #         },
+        #         'classification_method': 'rule_based'
+        #     }
+        # }
+        
+        # # This code is now unreachable due to the early return above
+        # # but keeping it for when the temporary code is removed
         if not filtered_models:
             print(f"Warning: No models available for request type: {request_type}")
             # Fallback to default model if available

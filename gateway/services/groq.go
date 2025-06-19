@@ -126,10 +126,10 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 	// Format messages for Groq
 	messages := []GroqMessage{}
 
-	// Add system prompt if available
+	// Add system prompt as a proper system message
 	finalSystemPrompt := systemPrompt
 	if profileContext != "" {
-		finalSystemPrompt += "\n\nUser Profile Context:\n" + profileContext
+		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
 	}
 
 	if finalSystemPrompt != "" {
