@@ -274,7 +274,7 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get current usage from the global rate limiter
 	usage := middleware.GetGlobalRateLimiter().GetOrCreateUsage(key)
-	currentCount, resetTime := usage.GetUsageInfo()
+	currentCount, resetTime, _, _ := usage.GetUsageInfo()
 
 	// Get blocking information
 	isBlocked, blockedUntil, recentRequests := usage.GetBlockingInfo()
