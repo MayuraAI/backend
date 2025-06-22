@@ -111,7 +111,7 @@ func getGroqConfig() (apiKey, baseURL string) {
 }
 
 // StreamGroqResponse calls Groq API and streams the response with optimizations
-func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string) error {
+func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
 	// Initialize optimized client
 	initGroqClient()
 
@@ -140,13 +140,19 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 	}
 
 	// Add previous messages (up to the last 4)
-	if len(previousMessages) > 0 {
-		startIdx := 0
-		if len(previousMessages) > 4 {
-			startIdx = len(previousMessages) - 4
+	// Filter out thinking blocks
+	filteredMessages := []models.ChatMessage{}
+	for _, msg := range previousMessages {
+		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+			filteredMessages = append(filteredMessages, msg)
 		}
-
-		for _, msg := range previousMessages[startIdx:] {
+	}
+	if len(filteredMessages) > 0 {
+		startIdx := 0
+		if len(filteredMessages) > 4 {
+			startIdx = len(filteredMessages) - 4
+		}
+		for _, msg := range filteredMessages[startIdx:] {
 			messages = append(messages, GroqMessage{
 				Role:    msg.Role,
 				Content: msg.Content,
@@ -176,10 +182,6 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 		Model:    model,
 		Messages: messages,
 		Stream:   true,
-		// Messages: map[string]interface{}{
-		// 	"temperature": 0.8,
-		// 	"top_p":       0.95,
-		// },
 	}
 
 	// Prepare optimized request
@@ -235,6 +237,8 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 
 	chunkCount := 0
 	var fullResponse strings.Builder
+	var inThinking bool = false
+	var thinkingBuffer strings.Builder
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -248,6 +252,18 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 
 			// Check for end of stream
 			if data == "[DONE]" {
+				// If we're still in thinking mode when finishing, close it (only for thinking models)
+				if isThinkingModel && inThinking {
+					thinkEndResponse := models.Response{
+						Message: "◁/think▷",
+						Type:    "chunk",
+					}
+					msg, err := models.FormatSSEMessage(thinkEndResponse)
+					if err == nil {
+						fmt.Fprint(w, msg)
+						flusher.Flush()
+					}
+				}
 				break
 			}
 
@@ -264,24 +280,50 @@ func StreamGroqResponse(ctx context.Context, w http.ResponseWriter, flusher http
 			if len(streamResp.Choices) > 0 {
 				content := streamResp.Choices[0].Delta.Content
 				if content != "" {
-					fullResponse.WriteString(content)
+					// Process content for thinking blocks only for thinking models
+					if isThinkingModel {
+						processedContent := processThinkingContent(content, &inThinking, &thinkingBuffer, w, flusher)
+						if processedContent != "" {
+							fullResponse.WriteString(processedContent)
 
-					// Send chunk using structured response format (matching Gemini)
-					chunkResponse := models.Response{
-						Message: content,
-						Type:    "chunk",
-					}
+							// Send processed chunk
+							chunkResponse := models.Response{
+								Message: processedContent,
+								Type:    "chunk",
+							}
 
-					msg, err := models.FormatSSEMessage(chunkResponse)
-					if err != nil {
-						return fmt.Errorf("error formatting chunk: %v", err)
-					}
+							msg, err := models.FormatSSEMessage(chunkResponse)
+							if err != nil {
+								return fmt.Errorf("error formatting chunk: %v", err)
+							}
 
-					_, err = fmt.Fprint(w, msg)
-					if err != nil {
-						return fmt.Errorf("error sending chunk: %v", err)
+							_, err = fmt.Fprint(w, msg)
+							if err != nil {
+								return fmt.Errorf("error sending chunk: %v", err)
+							}
+							flusher.Flush()
+						}
+					} else {
+						// For non-thinking models, send content as-is
+						fullResponse.WriteString(content)
+
+						// Send chunk using structured response format (matching Gemini)
+						chunkResponse := models.Response{
+							Message: content,
+							Type:    "chunk",
+						}
+
+						msg, err := models.FormatSSEMessage(chunkResponse)
+						if err != nil {
+							return fmt.Errorf("error formatting chunk: %v", err)
+						}
+
+						_, err = fmt.Fprint(w, msg)
+						if err != nil {
+							return fmt.Errorf("error sending chunk: %v", err)
+						}
+						flusher.Flush()
 					}
-					flusher.Flush()
 				}
 			}
 		}
@@ -364,4 +406,178 @@ func CallGroqAPI(model, prompt string) (string, error) {
 	}
 
 	return response.Choices[0].Delta.Content, nil
+}
+
+// processThinkingContent processes content chunks and handles <think> tags for Groq responses
+func processThinkingContent(content string, inThinking *bool, thinkingBuffer *strings.Builder, w http.ResponseWriter, flusher http.Flusher) string {
+	// Decode Unicode escape sequences in the content
+	decodedContent := decodeUnicodeEscapes(content)
+
+	// If we're not in thinking mode, check if this chunk starts thinking
+	if !*inThinking {
+		// Check if the new content contains <think>
+		if strings.Contains(decodedContent, "<think>") {
+			parts := strings.Split(decodedContent, "<think>")
+			beforeThink := parts[0]
+			afterThink := ""
+			if len(parts) > 1 {
+				afterThink = strings.Join(parts[1:], "<think>") // In case there are multiple <think> tags
+			}
+
+			// Send content before <think> as regular output
+			outputContent := beforeThink
+
+			// Send thinking start marker
+			thinkStartResponse := models.Response{
+				Message: "◁think▷",
+				Type:    "chunk",
+			}
+			msg, err := models.FormatSSEMessage(thinkStartResponse)
+			if err == nil {
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			}
+
+			*inThinking = true
+
+			// Process the content after <think>
+			if afterThink != "" {
+				return outputContent + processThinkingContentRecursive(afterThink, inThinking, w, flusher)
+			}
+
+			return outputContent
+		} else {
+			// No thinking tag, return as regular content
+			return decodedContent
+		}
+	} else {
+		// We're in thinking mode, check if this chunk ends thinking
+		if strings.Contains(decodedContent, "</think>") {
+			parts := strings.Split(decodedContent, "</think>")
+			thinkingContent := parts[0]
+			afterThink := ""
+			if len(parts) > 1 {
+				afterThink = strings.Join(parts[1:], "</think>") // In case there are multiple </think> tags
+			}
+
+			// Send thinking content
+			if thinkingContent != "" {
+				thinkingResponse := models.Response{
+					Message: thinkingContent,
+					Type:    "chunk",
+				}
+				msg, err := models.FormatSSEMessage(thinkingResponse)
+				if err == nil {
+					fmt.Fprint(w, msg)
+					flusher.Flush()
+				}
+			}
+
+			// Send thinking end marker
+			thinkEndResponse := models.Response{
+				Message: "◁/think▷",
+				Type:    "chunk",
+			}
+			msg, err := models.FormatSSEMessage(thinkEndResponse)
+			if err == nil {
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			}
+
+			*inThinking = false
+
+			// Return content after </think> as regular output
+			return afterThink
+		} else {
+			// Still in thinking mode, send as thinking content
+			if decodedContent != "" {
+				thinkingResponse := models.Response{
+					Message: decodedContent,
+					Type:    "chunk",
+				}
+				msg, err := models.FormatSSEMessage(thinkingResponse)
+				if err == nil {
+					fmt.Fprint(w, msg)
+					flusher.Flush()
+				}
+			}
+			return "" // No regular output when in thinking mode
+		}
+	}
+}
+
+// processThinkingContentRecursive handles recursive processing when there are multiple tags in one chunk
+func processThinkingContentRecursive(content string, inThinking *bool, w http.ResponseWriter, flusher http.Flusher) string {
+	if !*inThinking {
+		return content // Should not happen, but safety check
+	}
+
+	if strings.Contains(content, "</think>") {
+		parts := strings.Split(content, "</think>")
+		thinkingContent := parts[0]
+		afterThink := ""
+		if len(parts) > 1 {
+			afterThink = strings.Join(parts[1:], "</think>")
+		}
+
+		// Send thinking content
+		if thinkingContent != "" {
+			thinkingResponse := models.Response{
+				Message: thinkingContent,
+				Type:    "chunk",
+			}
+			msg, err := models.FormatSSEMessage(thinkingResponse)
+			if err == nil {
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			}
+		}
+
+		// Send thinking end marker
+		thinkEndResponse := models.Response{
+			Message: "◁/think▷",
+			Type:    "chunk",
+		}
+		msg, err := models.FormatSSEMessage(thinkEndResponse)
+		if err == nil {
+			fmt.Fprint(w, msg)
+			flusher.Flush()
+		}
+
+		*inThinking = false
+		return afterThink
+	} else {
+		// Send as thinking content
+		if content != "" {
+			thinkingResponse := models.Response{
+				Message: content,
+				Type:    "chunk",
+			}
+			msg, err := models.FormatSSEMessage(thinkingResponse)
+			if err == nil {
+				fmt.Fprint(w, msg)
+				flusher.Flush()
+			}
+		}
+		return ""
+	}
+}
+
+// decodeUnicodeEscapes decodes Unicode escape sequences in JSON strings
+func decodeUnicodeEscapes(s string) string {
+	// Replace common Unicode escapes that might appear in thinking tags
+	s = strings.ReplaceAll(s, "\\u003c", "◁")  // \u003c -> <
+	s = strings.ReplaceAll(s, "\\u003e", "▷")  // \u003e -> >
+	s = strings.ReplaceAll(s, "\\u002f", "/")  // \u002f -> /
+	s = strings.ReplaceAll(s, "\\u0022", "\"") // \u0022 -> "
+	s = strings.ReplaceAll(s, "\\u0027", "'")  // \u0027 -> '
+	s = strings.ReplaceAll(s, "\\u0026", "&")  // \u0026 -> &
+
+	// Handle other common escape sequences
+	s = strings.ReplaceAll(s, "\\n", "\n")  // \n -> newline
+	s = strings.ReplaceAll(s, "\\t", "\t")  // \t -> tab
+	s = strings.ReplaceAll(s, "\\r", "\r")  // \r -> carriage return
+	s = strings.ReplaceAll(s, "\\\\", "\\") // \\ -> \
+
+	return s
 }

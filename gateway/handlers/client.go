@@ -356,9 +356,9 @@ func streamModelResponse(ctx context.Context, w http.ResponseWriter, flusher htt
 	case "gemini":
 		err = services.StreamGeminiResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext, isThinkingModel)
 	case "openrouter":
-		err = services.StreamOpenRouterResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext)
+		err = services.StreamOpenRouterResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext, isThinkingModel)
 	case "groq":
-		err = services.StreamGroqResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext)
+		err = services.StreamGroqResponse(ctx, w, flusher, prompt, modelName, displayName, clientID, previousMessages, profileContext, isThinkingModel)
 	default:
 		return fmt.Errorf("unsupported provider: %s", providerName)
 	}

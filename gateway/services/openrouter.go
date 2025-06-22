@@ -39,8 +39,9 @@ type OpenRouterResponse struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role      string `json:"role"`
+			Content   string `json:"content"`
+			Reasoning string `json:"reasoning"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -99,7 +100,7 @@ func getOpenRouterConfig() (apiKey, baseURL string) {
 }
 
 // StreamOpenRouterResponse calls OpenRouter API and streams the response with optimizations
-func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string) error {
+func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
 	// Initialize optimized client
 	initOpenRouterClient()
 
@@ -128,13 +129,19 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 	}
 
 	// Add previous messages (up to the last 4)
-	if len(previousMessages) > 0 {
-		startIdx := 0
-		if len(previousMessages) > 4 {
-			startIdx = len(previousMessages) - 4
+	// Filter out thinking blocks
+	filteredMessages := []models.ChatMessage{}
+	for _, msg := range previousMessages {
+		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+			filteredMessages = append(filteredMessages, msg)
 		}
-
-		for _, msg := range previousMessages[startIdx:] {
+	}
+	if len(filteredMessages) > 0 {
+		startIdx := 0
+		if len(filteredMessages) > 4 {
+			startIdx = len(filteredMessages) - 4
+		}
+		for _, msg := range filteredMessages[startIdx:] {
 			messages = append(messages, OpenRouterMessage{
 				Role:    msg.Role,
 				Content: msg.Content,
@@ -223,6 +230,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 
 	chunkCount := 0
 	var fullResponse strings.Builder
+	var inReasoning bool = false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -241,6 +249,18 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 
 			// Check for end of stream
 			if data == "[DONE]" {
+				// If we're still in reasoning mode when finishing, close it (only for thinking models)
+				if isThinkingModel && inReasoning {
+					reasonEndResponse := models.Response{
+						Message: "◁/think▷",
+						Type:    "chunk",
+					}
+					msg, err := models.FormatSSEMessage(reasonEndResponse)
+					if err == nil {
+						fmt.Fprint(w, msg)
+						flusher.Flush()
+					}
+				}
 				break
 			}
 
@@ -256,6 +276,67 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 			// Extract the response part
 			if len(streamResp.Choices) > 0 {
 				content := streamResp.Choices[0].Delta.Content
+				reasoning := streamResp.Choices[0].Delta.Reasoning
+
+				// Handle reasoning state transitions and send appropriate markers only for thinking models
+				if isThinkingModel {
+					if reasoning != "" && !inReasoning {
+						// Starting to reason - send thinking start marker
+						reasonStartResponse := models.Response{
+							Message: "◁think▷",
+							Type:    "chunk",
+						}
+						msg, err := models.FormatSSEMessage(reasonStartResponse)
+						if err == nil {
+							fmt.Fprint(w, msg)
+							flusher.Flush()
+						}
+						inReasoning = true
+					} else if reasoning == "" && content != "" && inReasoning {
+						// Finished reasoning - send thinking end marker
+						reasonEndResponse := models.Response{
+							Message: "◁/think▷",
+							Type:    "chunk",
+						}
+						msg, err := models.FormatSSEMessage(reasonEndResponse)
+						if err == nil {
+							fmt.Fprint(w, msg)
+							flusher.Flush()
+						}
+						inReasoning = false
+					}
+				}
+
+				// Send reasoning content if present (only for thinking models)
+				if reasoning != "" && isThinkingModel {
+					// Send reasoning chunk
+					reasonStartResponse := models.Response{
+						Message: "◁think▷",
+						Type:    "chunk",
+					}
+					msg, err := models.FormatSSEMessage(reasonStartResponse)
+					if err == nil {
+						fmt.Fprint(w, msg)
+						flusher.Flush()
+					}
+					reasoningResponse := models.Response{
+						Message: reasoning,
+						Type:    "chunk",
+					}
+
+					msg, err = models.FormatSSEMessage(reasoningResponse)
+					if err != nil {
+						return fmt.Errorf("error formatting reasoning chunk: %v", err)
+					}
+
+					_, err = fmt.Fprint(w, msg)
+					if err != nil {
+						return fmt.Errorf("error sending reasoning chunk: %v", err)
+					}
+					flusher.Flush()
+				}
+
+				// Send regular content if present
 				if content != "" {
 					fullResponse.WriteString(content)
 
