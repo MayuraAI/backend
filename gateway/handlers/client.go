@@ -305,7 +305,7 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		currentMode = middleware.FreeRequest
-		message = "You've used all your pro requests for today. All additional requests are free requests."
+		message = "You've used all your pro requests for today."
 	}
 
 	// Create response
