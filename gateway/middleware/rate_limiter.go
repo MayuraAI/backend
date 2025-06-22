@@ -46,7 +46,7 @@ type RateLimitConfig struct {
 
 // Default rate limiting configuration
 var defaultConfig = RateLimitConfig{
-	RequestsPerDay:  15,             // 10 requests per day per user
+	RequestsPerDay:  1,              // 10 requests per day per user
 	CleanupInterval: 24 * time.Hour, // Clean up every 24 hours
 	CleanupTTL:      48 * time.Hour, // Remove usage records older than 48 hours
 

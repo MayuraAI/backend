@@ -167,14 +167,20 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	}
 
 	// Add previous messages (up to the last 4)
-	if len(previousMessages) > 0 {
+	// Filter out thinking blocks
+	filteredMessages := []models.ChatMessage{}
+	for _, msg := range previousMessages {
+		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+			filteredMessages = append(filteredMessages, msg)
+		}
+	}
+	if len(filteredMessages) > 0 {
 		// Limit to last 4 messages
 		startIdx := 0
-		if len(previousMessages) > 4 {
-			startIdx = len(previousMessages) - 4
+		if len(filteredMessages) > 4 {
+			startIdx = len(filteredMessages) - 4
 		}
-
-		for _, msg := range previousMessages[startIdx:] {
+		for _, msg := range filteredMessages[startIdx:] {
 			contents = append(contents, GeminiContent{
 				Role: msg.Role,
 				Parts: []struct {
