@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"gateway/middleware"
+	"gateway/pkg/logger"
 )
 
 // ModelRequest represents the request to the model service
@@ -228,7 +228,7 @@ func CallModelService(prompt string, requestType middleware.RequestType) (ModelR
 	classifierCircuit.onSuccess()
 
 	// Log the response for debugging
-	log.Printf("Model service response: %s (primary), %s (secondary)", modelResp.PrimaryModel, modelResp.SecondaryModel)
+	logger.GetDailyLogger().Info("Model service response: %s (primary), %s (secondary)", modelResp.PrimaryModel, modelResp.SecondaryModel)
 
 	return modelResp, nil
 }

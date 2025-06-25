@@ -5,6 +5,7 @@ import time
 from typing import Dict, Tuple, Any, Optional, List
 from pathlib import Path
 import sys
+from logging_utils import DailyLogger
 
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
@@ -41,7 +42,7 @@ class PromptRouter:
                 break
         
         if not self.default_model:
-            print("Warning: No default model found in config")
+            DailyLogger().warning("No default model found in config")
         
         # Define task importance levels
         self.task_importance = {
@@ -71,7 +72,7 @@ class PromptRouter:
         current_time = time.time()
         if current_time - self._last_config_check > self._config_check_interval:
             if self.config_path.stat().st_mtime > self._last_config_check:
-                print("Config file changed, reloading")
+                DailyLogger().info("Config file changed, reloading")
                 self._load_config()
             self._last_config_check = current_time
 
@@ -306,7 +307,7 @@ class PromptRouter:
         # # This code is now unreachable due to the early return above
         # # but keeping it for when the temporary code is removed
         if not filtered_models:
-            print(f"Warning: No models available for request type: {request_type}")
+            DailyLogger().warning(f"No models available for request type: {request_type}")
             # Fallback to default model if available
             if self.default_model and self.default_model in self.model_scores:
                 filtered_models = {self.default_model: self.model_scores[self.default_model]}
@@ -352,7 +353,7 @@ class PromptRouter:
             'classification_method': 'rule_based' if simple_result else 'ml_classification'
         }
         
-        print(f"Routing completed - Category: {predicted_category}, Primary: {primary_model}, Secondary: {secondary_model}")
+        DailyLogger().info(f"Routing completed - Category: {predicted_category}, Primary: {primary_model}, Secondary: {secondary_model}")
         
         return {
             'primary_model': primary_model,

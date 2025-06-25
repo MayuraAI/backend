@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"gateway/models"
+	"gateway/pkg/logger"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -375,7 +375,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 	fmt.Fprint(w, msg)
 	flusher.Flush()
 
-	log.Printf("OpenRouter streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
+	logger.GetDailyLogger().Info("OpenRouter streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
 
 	return nil
 }

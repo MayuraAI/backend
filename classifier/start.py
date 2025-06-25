@@ -5,6 +5,7 @@ import sys
 import argparse
 import asyncio
 from pathlib import Path
+from logging_utils import DailyLogger
 
 # Add parent directory to Python path
 current_dir = Path(__file__).resolve().parent
@@ -17,11 +18,11 @@ from router.prompt_router import PromptRouter
 async def initialize_models(train: bool = False):
     """Initialize and validate models before server start."""
     try:
-        print("Initializing router and loading models")
+        DailyLogger().info("Initializing router and loading models")
         router = PromptRouter()
         
         if train:
-            print("Training mode enabled - forcing model training")
+            DailyLogger().info("Training mode enabled - forcing model training")
             router.classifier._load_or_train_models(force_train=True)
         
         # Validate model initialization
@@ -29,20 +30,20 @@ async def initialize_models(train: bool = False):
             raise RuntimeError("Classifier failed to initialize")
         
         # Test model with a sample prompt to ensure everything is loaded
-        print("Testing model initialization")
+        DailyLogger().info("Testing model initialization")
         try:
             test_prompt = "This is a test prompt"
             probs = await router.classifier.classify_prompt(test_prompt)
             predicted_category = max(probs, key=probs.get)
-            print(f"Test prediction successful: {predicted_category}")
+            DailyLogger().info(f"Test prediction successful: {predicted_category}")
             return True
         except Exception as e:
-            print(f"Error during test prediction: {type(e).__name__}: {str(e)}")
+            DailyLogger().error(f"Error during test prediction: {type(e).__name__}: {str(e)}")
             return False
         
         return True
     except Exception as e:
-        print(f"Failed to initialize models: {type(e).__name__}: {str(e)}")
+        DailyLogger().error(f"Failed to initialize models: {type(e).__name__}: {str(e)}")
         return False
 
 def start_server():
@@ -57,7 +58,7 @@ def start_server():
         with open("config/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
     except Exception as e:
-        print(f"Error loading config: {type(e).__name__}: {str(e)}")
+        DailyLogger().error(f"Error loading config: {type(e).__name__}: {str(e)}")
         sys.exit(1)
 
     # Initialize models first
@@ -65,10 +66,10 @@ def start_server():
         return await initialize_models(train=args.train)
     
     if not asyncio.run(run_initialization()):
-        print("Model initialization failed, not starting server")
+        DailyLogger().error("Model initialization failed, not starting server")
         sys.exit(1)
 
-    print("Models initialized successfully, starting server")
+    DailyLogger().info("Models initialized successfully, starting server")
 
     # Get server config
     server_config = config.get('server', {})
@@ -107,7 +108,7 @@ def start_server():
     ])
 
     # Execute gunicorn
-    print(f"Starting server with gunicorn: {server_config.get('workers', 8)} workers on {server_config.get('host', '0.0.0.0')}:{server_config.get('port', 8000)}")
+    DailyLogger().info(f"Starting server with gunicorn: {server_config.get('workers', 8)} workers on {server_config.get('host', '0.0.0.0')}:{server_config.get('port', 8000)}")
     os.execvp("gunicorn", cmd)
 
 if __name__ == "__main__":

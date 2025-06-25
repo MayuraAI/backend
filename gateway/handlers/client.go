@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"gateway/middleware"
 	"gateway/models"
+	"gateway/pkg/logger"
 	"gateway/services"
 )
 
@@ -68,7 +68,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	clientID := rand.Intn(1000000)
 
-	log.Printf("Client %d: New request started from %s", clientID, r.RemoteAddr)
+	logger.GetDailyLogger().Info("Client %d: New request started from %s", clientID, r.RemoteAddr)
 
 	// Create request context with ID
 	ctx := r.Context()
@@ -76,13 +76,13 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	// Get authenticated user from context
 	user, userOk := middleware.GetSupabaseUserFromContext(ctx)
 	if userOk {
-		log.Printf("Processing request for user: %s (%s)", user.Email, user.ID.String())
+		logger.GetDailyLogger().Info("Processing request for user: %s (%s)", user.Email, user.ID.String())
 	}
 
 	// Get request type from context (set by rate limiter)
 	requestType, hasRequestType := middleware.GetRequestTypeFromContext(ctx)
 	if hasRequestType {
-		log.Printf("Request type: %s", string(requestType))
+		logger.GetDailyLogger().Info("Request type: %s", string(requestType))
 	}
 
 	// Increment metrics
@@ -144,7 +144,7 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Client %d: Processing prompt request (%d chars)", clientID, len(prompt))
+	logger.GetDailyLogger().Info("Client %d: Processing prompt request (%d chars)", clientID, len(prompt))
 
 	// Create context with timeout for the entire request
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -154,33 +154,33 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		<-ctx.Done()
 		if ctx.Err() == context.Canceled {
-			log.Printf("Client %d disconnected", clientID)
+			logger.GetDailyLogger().Info("Client %d disconnected", clientID)
 		} else if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("Client %d request timeout", clientID)
+			logger.GetDailyLogger().Info("Client %d request timeout", clientID)
 		}
 	}()
 
 	// Call the model service with timeout
 	modelResponse, err := callModelServiceWithTimeout(ctx, prompt, requestType)
 	if err != nil {
-		log.Printf("Model service error for client %d: %v", clientID, err)
+		logger.GetDailyLogger().Error("Model service error for client %d: %v", clientID, err)
 		sendErrorResponse(w, flusher, fmt.Sprintf("Model service error: %v", err), clientID)
 		atomic.AddInt64(&totalErrors, 1)
 		return
 	}
 
-	log.Printf("Selected model: %s (%s)", modelResponse.PrimaryModel, modelResponse.PrimaryModelDisplayName)
+	logger.GetDailyLogger().Info("Selected model: %s (%s)", modelResponse.PrimaryModel, modelResponse.PrimaryModelDisplayName)
 
 	// Use the new fallback streaming logic
 	err = streamWithFallback(ctx, w, flusher, modelResponse, prompt, clientID, reqBody.PreviousMessages, reqBody.ProfileContext)
 	if err != nil {
-		log.Printf("Streaming error for client %d: %v", clientID, err)
+		logger.GetDailyLogger().Error("Streaming error for client %d: %v", clientID, err)
 		sendErrorResponse(w, flusher, "Models not available currently. Please try again later.", clientID)
 		atomic.AddInt64(&totalErrors, 1)
 		return
 	}
 
-	log.Printf("Request completed for client %d in %.2fs", clientID, time.Since(startTime).Seconds())
+	logger.GetDailyLogger().Info("Request completed for client %d in %.2fs", clientID, time.Since(startTime).Seconds())
 }
 
 // callModelServiceWithTimeout calls the model service with context timeout
@@ -220,7 +220,7 @@ func sendErrorResponse(w http.ResponseWriter, flusher http.Flusher, errorMsg str
 
 	msg, err := models.FormatSSEMessage(errorResponse)
 	if err != nil {
-		log.Printf("Error formatting error response for client %d: %v", clientID, err)
+		logger.GetDailyLogger().Error("Error formatting error response for client %d: %v", clientID, err)
 		// Fallback to plain HTTP error if SSE formatting fails
 		http.Error(w, errorMsg, http.StatusInternalServerError)
 		return
@@ -341,7 +341,7 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(status); err != nil {
-		log.Printf("Error encoding rate limit status: %v", err)
+		logger.GetDailyLogger().Error("Error encoding rate limit status: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -446,14 +446,14 @@ func streamWithFallback(ctx context.Context, w http.ResponseWriter, flusher http
 	var errors []string
 
 	for i, model := range modelsToTry {
-		log.Printf("Trying model %d/%d: %s (%s) for client %d", i+1, len(modelsToTry), model.displayName, model.provider, clientID)
+		logger.GetDailyLogger().Info("Trying model %d/%d: %s (%s) for client %d", i+1, len(modelsToTry), model.displayName, model.provider, clientID)
 
 		// Try to stream with this model
 		err := streamModelResponse(ctx, w, flusher, model.modelName, model.displayName, model.provider, prompt, clientID, previousMessages, profileContext, model.isThinkingModel)
 
 		if err == nil {
 			// Success!
-			log.Printf("Successfully streamed with model %s for client %d", model.displayName, clientID)
+			logger.GetDailyLogger().Info("Successfully streamed with model %s for client %d", model.displayName, clientID)
 			return nil
 		}
 
@@ -462,11 +462,11 @@ func streamWithFallback(ctx context.Context, w http.ResponseWriter, flusher http
 		errors = append(errors, fmt.Sprintf("%s: %v", model.displayName, err))
 
 		// Log the error and continue to next model
-		log.Printf("Model %s failed for client %d: %v", model.displayName, clientID, err)
+		logger.GetDailyLogger().Error("Model %s failed for client %d: %v", model.displayName, clientID, err)
 	}
 
 	// All models failed - log detailed error information
-	log.Printf("All %d models failed for client %d. Errors: %v", len(modelsToTry), clientID, errors)
+	logger.GetDailyLogger().Error("All %d models failed for client %d. Errors: %v", len(modelsToTry), clientID, errors)
 
 	// Return the last error
 	if lastError != nil {

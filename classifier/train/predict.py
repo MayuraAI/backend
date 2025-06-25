@@ -3,6 +3,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import json
 import numpy as np
 from pathlib import Path
+from logging_utils import DailyLogger
 
 class PromptClassifier:
     def __init__(self, model_path="./best_model"):
@@ -23,7 +24,7 @@ class PromptClassifier:
                 self.category_to_id = mappings['category_to_id']
         else:
             # Fallback to old method if mappings file doesn't exist
-            print("Warning: category_mappings.json not found, using fallback method")
+            DailyLogger().warning("category_mappings.json not found, using fallback method")
             with open('../data/data.json', 'r') as f:
                 data = json.load(f)
             categories = sorted(list(set(item['Category'] for item in data)))
@@ -91,23 +92,23 @@ def main():
         "Act like you're a pirate captain"
     ]
     
-    print("Making predictions for example prompts:")
-    print("\n" + "="*60)
+    DailyLogger().info("Making predictions for example prompts:")
+    DailyLogger().info("="*60)
     
     for prompt in example_prompts:
-        print(f"\nPrompt: {prompt}")
+        DailyLogger().info(f"Prompt: {prompt}")
         
         # Get single category prediction (like new dataset format)
         single_category = classifier.predict(prompt, return_single_category=True)
-        print(f"Best Category: {single_category}")
+        DailyLogger().info(f"Best Category: {single_category}")
         
         # Get all probabilities
         predictions = classifier.predict(prompt)
-        print("\nTop 3 predictions:")
+        DailyLogger().info("Top 3 predictions:")
         for i, (category, prob) in enumerate(list(predictions.items())[:3]):
-            print(f"  {i+1}. {category}: {prob:.4f}")
+            DailyLogger().info(f"  {i+1}. {category}: {prob:.4f}")
         
-        print("-" * 40)
+        DailyLogger().info("-" * 40)
 
 if __name__ == "__main__":
     main() 
