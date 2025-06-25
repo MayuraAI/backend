@@ -14,10 +14,6 @@ parent_dir = current_dir.parent
 if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
-from router.logging_config import get_logger, log_performance
-
-logger = get_logger(__name__)
-
 # Global model instances for sharing across workers
 # Can be modified via config
 MAX_MODEL_INSTANCES = 2
@@ -28,7 +24,7 @@ class PromptClassifier:
         """Round-robin pattern for multiple model instances."""
         global _model_instances
         if not _model_instances:
-            logger.info(f"Creating {MAX_MODEL_INSTANCES} model instances")
+            print(f"Creating {MAX_MODEL_INSTANCES} model instances")
             for _ in range(MAX_MODEL_INSTANCES):
                 instance = super(PromptClassifier, cls).__new__(cls)
                 instance._initialized = False
@@ -44,13 +40,13 @@ class PromptClassifier:
         if getattr(self, '_initialized', False):
             return
             
-        logger.info("Initializing model instance")
+        print("Initializing model instance")
         self.config = self._load_config(config_path)
         
         # Initialize model and tokenizer
         self._init_model()
         self._initialized = True
-        logger.info("Model initialization complete")
+        print("Model initialization complete")
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -64,7 +60,7 @@ class PromptClassifier:
         if not model_path.exists():
             raise ValueError(f"Model not found at {model_path}. Please train the model first.")
         
-        logger.info("Loading model and tokenizer", extra_fields={'model_path': str(model_path)})
+        print(f"Loading model and tokenizer from {model_path}")
         
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
@@ -80,18 +76,14 @@ class PromptClassifier:
         self.id_to_label = config.id2label
         self.label_mapping = {v: int(k) for k, v in config.id2label.items()}
         
-        logger.info("Model initialization complete", extra_fields={
-            'device': str(self.device),
-            'num_labels': len(self.label_mapping)
-        })
+        print(f"Model loaded on {self.device} with {len(self.label_mapping)} labels")
 
-    @log_performance("predict", 20.0)
-    def predict(self, text: str) -> Tuple[str, Dict[str, float]]:
+    async def classify_prompt(self, text: str) -> Dict[str, float]:
         """
-        Predict category for input text.
+        Classify prompt and return probability distribution.
         
         Returns:
-            Tuple of (predicted_category, probability_dict)
+            Dictionary of category probabilities
         """
         # Tokenize input
         inputs = self.tokenizer(
@@ -120,8 +112,4 @@ class PromptClassifier:
             for i, p in enumerate(probs)
         }
         
-        # Get prediction
-        predicted_idx = probs.argmax()
-        predicted_category = self.id_to_label[predicted_idx]
-        
-        return predicted_category, prob_dict
+        return prob_dict

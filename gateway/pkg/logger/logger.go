@@ -76,7 +76,7 @@ func (f *TextFormatter) Format(entry LogEntry) string {
 var (
 	defaultLogger *Logger
 	globalLevel   LogLevel = INFO
-	useJSON       bool     = true
+	useJSON       bool     = false
 )
 
 // Initialize sets up the default logger
@@ -102,7 +102,7 @@ func Initialize(service string, level LogLevel, jsonFormat bool) {
 // GetLogger creates a new logger instance
 func GetLogger(name string) *Logger {
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 
 	var formatter Formatter
@@ -308,28 +308,28 @@ func (p *PerformanceLogger) CompleteWithError(ctx context.Context, err error) {
 // Global convenience functions
 func Debug(message string) {
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 	defaultLogger.Debug(message)
 }
 
 func Info(message string) {
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 	defaultLogger.Info(message)
 }
 
 func Warn(message string) {
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 	defaultLogger.Warn(message)
 }
 
 func Error(message string, err error) {
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 	defaultLogger.Error(message, err)
 }
@@ -345,7 +345,7 @@ type logWriter struct{}
 func (w *logWriter) Write(p []byte) (n int, err error) {
 	message := string(p)
 	if defaultLogger == nil {
-		Initialize("gateway", INFO, true)
+		Initialize("gateway", INFO, false)
 	}
 	defaultLogger.Info(message)
 	return len(p), nil
@@ -369,9 +369,9 @@ func InitFromEnv() {
 		level = ERROR
 	}
 
-	jsonFormat := true
-	if formatStr := os.Getenv("LOG_FORMAT"); formatStr == "text" {
-		jsonFormat = false
+	jsonFormat := false
+	if formatStr := os.Getenv("LOG_FORMAT"); formatStr == "json" {
+		jsonFormat = true
 	}
 
 	Initialize(service, level, jsonFormat)

@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"gateway/models"
-	"gateway/pkg/logger"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -18,8 +18,9 @@ import (
 
 // GeminiRequest represents the request to Gemini API
 type GeminiRequest struct {
-	Contents       []GeminiContent `json:"contents"`
-	SafetySettings []struct {
+	Contents          []GeminiContent          `json:"contents"`
+	SystemInstruction *GeminiSystemInstruction `json:"systemInstruction,omitempty"`
+	SafetySettings    []struct {
 		Category  string `json:"category"`
 		Threshold string `json:"threshold"`
 	} `json:"safetySettings,omitempty"`
@@ -28,6 +29,10 @@ type GeminiRequest struct {
 		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 		TopP            float64 `json:"topP,omitempty"`
 		TopK            int     `json:"topK,omitempty"`
+		ThinkingConfig  *struct {
+			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+		} `json:"thinkingConfig,omitempty"`
 	} `json:"generationConfig,omitempty"`
 }
 
@@ -37,6 +42,13 @@ type GeminiContent struct {
 		Text string `json:"text"`
 	} `json:"parts"`
 	Role string `json:"role,omitempty"`
+}
+
+// GeminiSystemInstruction represents a system instruction for Gemini
+type GeminiSystemInstruction struct {
+	Parts []struct {
+		Text string `json:"text"`
+	} `json:"parts"`
 }
 
 // GeminiResponse represents a response from the Gemini API
@@ -117,7 +129,7 @@ func getGeminiConfig() (apiKey, modelName, baseURL string) {
 }
 
 // StreamGeminiResponse calls Gemini API and streams the response with optimizations
-func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, clientID int, previousMessages []models.ChatMessage, profileContext string, workspaceInstructions string) error {
+func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
 	// Initialize optimized client
 	initGeminiClient()
 
@@ -137,25 +149,38 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	// Format messages for Gemini
 	contents := []GeminiContent{}
 
-	// Add system prompt as a system message if available
-	// Gemini API does not support a dedicated "system" role, so prepend to the first user message.
+	// Prepare system instruction
+	var systemInstruction *GeminiSystemInstruction
 	finalSystemPrompt := systemPrompt
 	if profileContext != "" {
-		finalSystemPrompt += "\n\nUser Profile Context:\n" + profileContext
+		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
 	}
-	if workspaceInstructions != "" {
-		finalSystemPrompt += "\n\nWorkspace Instructions:\n" + workspaceInstructions
+
+	if finalSystemPrompt != "" {
+		systemInstruction = &GeminiSystemInstruction{
+			Parts: []struct {
+				Text string `json:"text"`
+			}{
+				{Text: finalSystemPrompt},
+			},
+		}
 	}
 
 	// Add previous messages (up to the last 4)
-	if len(previousMessages) > 0 {
+	// Filter out thinking blocks
+	filteredMessages := []models.ChatMessage{}
+	for _, msg := range previousMessages {
+		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+			filteredMessages = append(filteredMessages, msg)
+		}
+	}
+	if len(filteredMessages) > 0 {
 		// Limit to last 4 messages
 		startIdx := 0
-		if len(previousMessages) > 4 {
-			startIdx = len(previousMessages) - 4
+		if len(filteredMessages) > 4 {
+			startIdx = len(filteredMessages) - 4
 		}
-
-		for _, msg := range previousMessages[startIdx:] {
+		for _, msg := range filteredMessages[startIdx:] {
 			contents = append(contents, GeminiContent{
 				Role: msg.Role,
 				Parts: []struct {
@@ -178,37 +203,48 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 	// Add the current prompt as a user message if needed
 	if addCurrentPrompt {
-		userContent := prompt
-		if finalSystemPrompt != "" {
-			userContent = finalSystemPrompt + "\n\n" + userContent
-		}
 		contents = append(contents, GeminiContent{
 			Role: "user",
 			Parts: []struct {
 				Text string `json:"text"`
 			}{
-				{Text: userContent},
+				{Text: prompt},
 			},
 		})
-	} else if finalSystemPrompt != "" && len(contents) > 0 && contents[len(contents)-1].Role == "user" {
-		// If current prompt is not added, but system prompt exists and last message is user, prepend system prompt
-		contents[len(contents)-1].Parts[0].Text = finalSystemPrompt + "\n\n" + contents[len(contents)-1].Parts[0].Text
 	}
 
-	// Create the request body
-	reqBody := GeminiRequest{
-		Contents: contents,
-		GenerationConfig: struct {
-			Temperature     float64 `json:"temperature,omitempty"`
-			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-			TopP            float64 `json:"topP,omitempty"`
-			TopK            int     `json:"topK,omitempty"`
+	// Create the request body with conditional ThinkingConfig
+	generationConfig := struct {
+		Temperature     float64 `json:"temperature,omitempty"`
+		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+		TopP            float64 `json:"topP,omitempty"`
+		TopK            int     `json:"topK,omitempty"`
+		ThinkingConfig  *struct {
+			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+		} `json:"thinkingConfig,omitempty"`
+	}{
+		Temperature: 0.7,
+		// MaxOutputTokens: 2048,
+		TopP: 0.95,
+		TopK: 40,
+	}
+
+	// Only add ThinkingConfig if this is a thinking model
+	if isThinkingModel {
+		generationConfig.ThinkingConfig = &struct {
+			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+			IncludeThoughts bool `json:"includeThoughts,omitempty"`
 		}{
-			Temperature: 0.7,
-			// MaxOutputTokens: 2048,
-			TopP: 0.95,
-			TopK: 40,
-		},
+			ThinkingBudget:  1024,
+			IncludeThoughts: true,
+		}
+	}
+
+	reqBody := GeminiRequest{
+		Contents:          contents,
+		SystemInstruction: systemInstruction,
+		GenerationConfig:  generationConfig,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -243,6 +279,19 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		return fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// API request succeeded - now send start chunk with model display name
+	startResponse := models.Response{
+		Message: displayName,
+		Type:    "start",
+		Model:   displayName,
+	}
+
+	startMsg, err := models.FormatSSEMessage(startResponse)
+	if err == nil {
+		fmt.Fprint(w, startMsg)
+		flusher.Flush()
+	}
+
 	// Stream processing with optimized buffering
 	scanner := bufio.NewScanner(resp.Body)
 
@@ -251,8 +300,8 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	scanner.Buffer(buf, 64*1024)
 
 	chunkCount := 0
-	firstChunkTime := time.Time{}
 	var fullResponse strings.Builder
+	var inThinking bool = false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -275,14 +324,11 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 			continue
 		}
 
-		// Track first chunk timing
-		if chunkCount == 0 {
-			firstChunkTime = time.Now()
-		}
 		chunkCount++
 
 		// Extract the response part
 		var chunkText string
+		var isThought bool = false
 		isFinal := false
 
 		// Navigate through the JSON structure to find the text
@@ -293,7 +339,13 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 						if part, ok := parts[0].(map[string]interface{}); ok {
 							if text, ok := part["text"].(string); ok {
 								chunkText = text
-								fullResponse.WriteString(text)
+								if !isThought {
+									fullResponse.WriteString(text)
+								}
+							}
+							// Check if this is a thought
+							if thought, ok := part["thought"].(bool); ok && thought {
+								isThought = true
 							}
 						}
 					}
@@ -303,6 +355,35 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 				if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
 					isFinal = true
 				}
+			}
+		}
+
+		// Handle thinking state transitions and send appropriate markers only for thinking models
+		if isThinkingModel {
+			if isThought && !inThinking {
+				// Starting to think - send thinking start marker
+				thinkStartResponse := models.Response{
+					Message: "◁think▷",
+					Type:    "chunk",
+				}
+				msg, err := models.FormatSSEMessage(thinkStartResponse)
+				if err == nil {
+					fmt.Fprint(w, msg)
+					flusher.Flush()
+				}
+				inThinking = true
+			} else if !isThought && inThinking {
+				// Finished thinking - send thinking end marker
+				thinkEndResponse := models.Response{
+					Message: "◁/think▷",
+					Type:    "chunk",
+				}
+				msg, err := models.FormatSSEMessage(thinkEndResponse)
+				if err == nil {
+					fmt.Fprint(w, msg)
+					flusher.Flush()
+				}
+				inThinking = false
 			}
 		}
 
@@ -327,11 +408,18 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 		// Check if done
 		if isFinal {
-			totalTime := time.Since(startTime)
-			timeToFirst := firstChunkTime.Sub(startTime)
-
-			// Log performance metrics
-			logGeminiStreamingMetrics(modelName, chunkCount, timeToFirst, totalTime, fullResponse.Len())
+			// If we're still in thinking mode when finishing, close it (only for thinking models)
+			if isThinkingModel && inThinking {
+				thinkEndResponse := models.Response{
+					Message: "◁/think▷",
+					Type:    "chunk",
+				}
+				msg, err := models.FormatSSEMessage(thinkEndResponse)
+				if err == nil {
+					fmt.Fprint(w, msg)
+					flusher.Flush()
+				}
+			}
 			break
 		}
 	}
@@ -350,36 +438,13 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	fmt.Fprint(w, msg)
 	flusher.Flush()
 
-	streamTime := time.Since(startTime)
-	streamLogger := logger.GetLogger("stream")
-	streamLogger.InfoWithFieldsCtx(ctx, "Gemini streaming completed", map[string]interface{}{
-		"client_id":     clientID,
-		"chunk_count":   chunkCount,
-		"stream_time_s": streamTime.Seconds(),
-		"model":         model,
-	})
+	log.Printf("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
 
 	return nil
 }
 
-// logGeminiStreamingMetrics logs performance metrics for monitoring
-func logGeminiStreamingMetrics(model string, chunks int, timeToFirst, totalTime time.Duration, responseLength int) {
-	avgChunkTime := float64(totalTime.Milliseconds()) / float64(chunks)
-
-	log := logger.GetLogger("gemini.metrics")
-	log.InfoWithFields("Gemini streaming metrics", map[string]interface{}{
-		"model":                     model,
-		"chunks":                    chunks,
-		"response_length":           responseLength,
-		"time_to_first_ms":          timeToFirst.Milliseconds(),
-		"total_time_s":              totalTime.Seconds(),
-		"avg_chunk_time_ms":         avgChunkTime,
-		"throughput_chunks_per_sec": float64(chunks) / totalTime.Seconds(),
-	})
-}
-
 // CallGeminiAPI calls Gemini API for non-streaming response
-func CallGeminiAPI(model, prompt string) (string, error) {
+func CallGeminiAPI(model, prompt string, isThinkingModel bool) (string, error) {
 	initGeminiClient()
 
 	apiKey, modelName, baseURL := getGeminiConfig()
@@ -387,6 +452,34 @@ func CallGeminiAPI(model, prompt string) (string, error) {
 	// Use provided model or fall back to default
 	if model != "" {
 		modelName = model
+	}
+
+	// Create generation config with conditional ThinkingConfig
+	generationConfig := struct {
+		Temperature     float64 `json:"temperature,omitempty"`
+		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+		TopP            float64 `json:"topP,omitempty"`
+		TopK            int     `json:"topK,omitempty"`
+		ThinkingConfig  *struct {
+			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+		} `json:"thinkingConfig,omitempty"`
+	}{
+		Temperature:     0.7,
+		MaxOutputTokens: 2048,
+		TopP:            0.95,
+		TopK:            40,
+	}
+
+	// Only add ThinkingConfig if this is a thinking model
+	if isThinkingModel {
+		generationConfig.ThinkingConfig = &struct {
+			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+		}{
+			ThinkingBudget:  1024,
+			IncludeThoughts: true,
+		}
 	}
 
 	// Prepare the request
@@ -400,17 +493,7 @@ func CallGeminiAPI(model, prompt string) (string, error) {
 				},
 			},
 		},
-		GenerationConfig: struct {
-			Temperature     float64 `json:"temperature,omitempty"`
-			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-			TopP            float64 `json:"topP,omitempty"`
-			TopK            int     `json:"topK,omitempty"`
-		}{
-			Temperature:     0.7,
-			MaxOutputTokens: 2048,
-			TopP:            0.95,
-			TopK:            40,
-		},
+		GenerationConfig: generationConfig,
 	}
 
 	jsonData, err := json.Marshal(reqBody)

@@ -3,6 +3,7 @@ import yaml
 import os
 import sys
 import argparse
+import asyncio
 from pathlib import Path
 
 # Add parent directory to Python path
@@ -12,52 +13,36 @@ if str(parent_dir) not in sys.path:
     sys.path.append(str(parent_dir))
 
 from router.prompt_router import PromptRouter
-from router.logging_config import setup_logging, get_logger
 
-# Setup structured logging
-setup_logging(
-    log_level=os.getenv("LOG_LEVEL", "INFO"),
-    log_format=os.getenv("LOG_FORMAT", "structured")
-)
-logger = get_logger(__name__)
-
-def initialize_models(train: bool = False):
+async def initialize_models(train: bool = False):
     """Initialize and validate models before server start."""
     try:
-        logger.info("Initializing router and loading models")
+        print("Initializing router and loading models")
         router = PromptRouter()
         
         if train:
-            logger.info("Training mode enabled - forcing model training")
+            print("Training mode enabled - forcing model training")
             router.classifier._load_or_train_models(force_train=True)
         
         # Validate model initialization
-        if not router.classifier or not router.classifier.embedding_model:
-            raise RuntimeError("Embedding model failed to initialize")
+        if not router.classifier:
+            raise RuntimeError("Classifier failed to initialize")
         
         # Test model with a sample prompt to ensure everything is loaded
-        logger.info("Testing model initialization")
+        print("Testing model initialization")
         try:
             test_prompt = "This is a test prompt"
-            category, probs = router.classifier.predict(test_prompt)
-            logger.info("Test prediction successful", extra_fields={
-                'predicted_category': category,
-                'operation': 'model_initialization_test'
-            })
+            probs = await router.classifier.classify_prompt(test_prompt)
+            predicted_category = max(probs, key=probs.get)
+            print(f"Test prediction successful: {predicted_category}")
             return True
         except Exception as e:
-            logger.error("Error during test prediction", extra_fields={
-                'operation': 'model_initialization_test',
-                'error_type': type(e).__name__
-            })
+            print(f"Error during test prediction: {type(e).__name__}: {str(e)}")
             return False
         
         return True
     except Exception as e:
-        logger.error("Failed to initialize models", extra_fields={
-            'operation': 'model_initialization',
-            'error_type': type(e).__name__
-        })
+        print(f"Failed to initialize models: {type(e).__name__}: {str(e)}")
         return False
 
 def start_server():
@@ -72,15 +57,18 @@ def start_server():
         with open("config/config.yaml", 'r') as f:
             config = yaml.safe_load(f)
     except Exception as e:
-        logger.error("Error loading config", extra_fields={'error_type': type(e).__name__})
+        print(f"Error loading config: {type(e).__name__}: {str(e)}")
         sys.exit(1)
 
     # Initialize models first
-    if not initialize_models(train=args.train):
-        logger.error("Model initialization failed, not starting server")
+    async def run_initialization():
+        return await initialize_models(train=args.train)
+    
+    if not asyncio.run(run_initialization()):
+        print("Model initialization failed, not starting server")
         sys.exit(1)
 
-    logger.info("Models initialized successfully, starting server")
+    print("Models initialized successfully, starting server")
 
     # Get server config
     server_config = config.get('server', {})
@@ -119,11 +107,7 @@ def start_server():
     ])
 
     # Execute gunicorn
-    logger.info("Starting server with gunicorn", extra_fields={
-        'workers': server_config.get('workers', 8),
-        'host': server_config.get('host', '0.0.0.0'),
-        'port': server_config.get('port', 8000)
-    })
+    print(f"Starting server with gunicorn: {server_config.get('workers', 8)} workers on {server_config.get('host', '0.0.0.0')}:{server_config.get('port', 8000)}")
     os.execvp("gunicorn", cmd)
 
 if __name__ == "__main__":

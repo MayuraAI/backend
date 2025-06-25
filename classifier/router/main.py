@@ -9,11 +9,6 @@ from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
 
 from router.prompt_router import PromptRouter
-from router.logging_config import setup_logging, get_logger, with_request_id, generate_request_id, request_id
-
-# Setup structured logging
-setup_logging()
-logger = get_logger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -72,60 +67,68 @@ CONCURRENT_REQUESTS = Gauge(
 
 # Initialize router at startup
 router = PromptRouter()
-logger.info("Router initialized at startup")
+print("Router initialized at startup")
 
 class PromptRequest(BaseModel):
     prompt: str
+    request_type: Optional[str] = "free"  # "pro" or "free"
     params: Optional[Dict[str, Any]] = None
 
 class PromptResponse(BaseModel):
-    model: str
+    primary_model: str
+    primary_model_display_name: str
+    secondary_model: str
+    secondary_model_display_name: str
+    default_model: str
+    default_model_display_name: str
     metadata: Dict[str, Any]
 
-@app.get("/health")
-@with_request_id
-async def health_check():
-    logger.info("Health check requested")
-    return {"status": "healthy"}
-
 @app.post("/complete", response_model=PromptResponse)
-@with_request_id
 async def route_prompt_endpoint(request: PromptRequest):
-    """Route a prompt to the most appropriate model."""
+    """Route a prompt to the most appropriate models."""
     CONCURRENT_REQUESTS.inc()
     
     try:
         with LATENCY_HISTOGRAM.labels('/complete').time():
-            logger.info("Processing prompt routing request", extra_fields={
-                'prompt_length': len(request.prompt),
-                'has_params': request.params is not None
-            })
+            print(f"Processing prompt routing request: {len(request.prompt)} chars, type: {request.request_type}")
+            
+            # Validate request_type
+            if request.request_type not in ["pro", "free"]:
+                raise HTTPException(status_code=400, detail="request_type must be 'pro' or 'free'")
             
             # Route the prompt
-            model, metadata = await router.route_prompt(request.prompt)
+            result = await router.route_prompt(
+                request.prompt, 
+                request.request_type
+            )
+            primary_model = result['primary_model']
+            secondary_model = result['secondary_model']
+            default_model = result['default_model']
+            metadata = result['metadata']
             
             # Update metrics
-            MODEL_SELECTION_COUNTER.labels(model).inc()
+            MODEL_SELECTION_COUNTER.labels(primary_model).inc()
             CATEGORY_COUNTER.labels(metadata['predicted_category']).inc()
             CONFIDENCE_GAUGE.set(metadata['confidence'])
             REQUEST_COUNT.labels('/complete', 'success').inc()
             
-            logger.info("Prompt routing completed", extra_fields={
-                'selected_model': model,
-                'predicted_category': metadata['predicted_category'],
-                'confidence': metadata['confidence']
-            })
+            print(f"Routing completed: {primary_model} (primary), {secondary_model} (secondary), category: {metadata['predicted_category']}")
             
             return PromptResponse(
-                model=model,
+                primary_model=primary_model,
+                primary_model_display_name=result['primary_model_display_name'],
+                secondary_model=secondary_model,
+                secondary_model_display_name=result['secondary_model_display_name'],
+                default_model=default_model,
+                default_model_display_name=result['default_model_display_name'],
                 metadata=metadata
             )
             
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        logger.error("Error processing request", extra_fields={
-            'error_type': type(e).__name__,
-            'prompt_length': len(request.prompt) if request.prompt else 0
-        })
+        print(f"Error processing request: {type(e).__name__}: {str(e)}")
         REQUEST_COUNT.labels('/complete', 'error').inc()
         raise HTTPException(status_code=500, detail="Internal server error")
     

@@ -4,18 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
-
-	"gateway/pkg/logger"
 )
 
 // DailyUsage represents daily usage tracking for a user/IP
 type DailyUsage struct {
 	RequestCount int       // Number of requests made today
 	ResetTime    time.Time // When the daily limit resets (midnight)
+
+	// Per-minute rate limiting
+	MinuteRequestCount int       // Number of requests made in current minute
+	MinuteResetTime    time.Time // When the minute limit resets
 
 	// Suspicious activity tracking
 	RequestTimestamps []time.Time // Recent request timestamps for burst detection
@@ -34,9 +37,10 @@ type RateLimiter struct {
 
 // RateLimitConfig holds rate limiting configuration
 type RateLimitConfig struct {
-	RequestsPerDay  int           // Daily request limit
-	CleanupInterval time.Duration // How often to clean up old usage records
-	CleanupTTL      time.Duration // How long to keep inactive usage records
+	RequestsPerDay    int           // Daily request limit
+	RequestsPerMinute int           // Per-minute request limit
+	CleanupInterval   time.Duration // How often to clean up old usage records
+	CleanupTTL        time.Duration // How long to keep inactive usage records
 
 	// Suspicious activity detection
 	SuspiciousThreshold int           // Max requests allowed in time window
@@ -47,15 +51,16 @@ type RateLimitConfig struct {
 
 // Default rate limiting configuration
 var defaultConfig = RateLimitConfig{
-	RequestsPerDay:  10,             // 10 requests per day per user
-	CleanupInterval: 24 * time.Hour, // Clean up every 24 hours
-	CleanupTTL:      48 * time.Hour, // Remove usage records older than 48 hours
+	RequestsPerDay:    10,             // 10 requests per day per user
+	RequestsPerMinute: 3,              // 3 requests per minute per user
+	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
+	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
 
 	// Suspicious activity defaults
-	SuspiciousThreshold: 20,               // 20 requests in 1 minute is suspicious
-	SuspiciousWindow:    1 * time.Minute,  // 1 minute window
-	BlockDuration:       15 * time.Minute, // Block for 15 minutes
-	TrackingWindow:      5 * time.Minute,  // Keep timestamps for 5 minutes
+	SuspiciousThreshold: 15,               // 15 requests in 5 minutes is suspicious
+	SuspiciousWindow:    5 * time.Minute,  // 5 minute window
+	BlockDuration:       60 * time.Minute, // Block for 1 hour
+	TrackingWindow:      10 * time.Minute, // Keep timestamps for 10 minutes
 }
 
 // Global rate limiter instance
@@ -76,7 +81,7 @@ const (
 	FreeRequest RequestType = "free"
 )
 
-// Initialize the rate limiter
+// init initializes the global rate limiter
 func init() {
 	globalRateLimiter = NewRateLimiter(defaultConfig)
 }
@@ -99,13 +104,17 @@ func NewDailyUsage() *DailyUsage {
 	now := time.Now()
 	// Set reset time to next midnight
 	nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+	// Set minute reset time to next minute
+	nextMinute := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
 
 	return &DailyUsage{
-		RequestCount:      0,
-		ResetTime:         nextMidnight,
-		RequestTimestamps: make([]time.Time, 0),
-		BlockedUntil:      time.Time{},
-		IsBlocked:         false,
+		RequestCount:       0,
+		ResetTime:          nextMidnight,
+		MinuteRequestCount: 0,
+		MinuteResetTime:    nextMinute,
+		RequestTimestamps:  make([]time.Time, 0),
+		BlockedUntil:       time.Time{},
+		IsBlocked:          false,
 	}
 }
 
@@ -127,7 +136,7 @@ func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitCon
 		du.BlockedUntil = time.Time{}
 	}
 
-	// Check if we need to reset (new day)
+	// Check if we need to reset daily counter (new day)
 	if now.After(du.ResetTime) {
 		du.RequestCount = 0
 		// Set reset time to next midnight
@@ -135,6 +144,19 @@ func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitCon
 		du.ResetTime = nextMidnight
 		// Clear old timestamps on daily reset
 		du.RequestTimestamps = make([]time.Time, 0)
+	}
+
+	// Check if we need to reset minute counter (new minute)
+	if now.After(du.MinuteResetTime) {
+		du.MinuteRequestCount = 0
+		// Set reset time to next minute
+		nextMinute := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
+		du.MinuteResetTime = nextMinute
+	}
+
+	// Check per-minute rate limit first
+	if du.MinuteRequestCount >= config.RequestsPerMinute {
+		return FreeRequest, false // Request is rate limited by per-minute limit
 	}
 
 	// Add current request timestamp
@@ -157,10 +179,11 @@ func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitCon
 		return FreeRequest, false // Request is blocked due to suspicious activity
 	}
 
-	// Increment request count
+	// Increment both daily and minute request counts
 	du.RequestCount++
+	du.MinuteRequestCount++
 
-	// Determine if this is a pro or free request
+	// Determine if this is a pro or free request based on daily limit
 	if du.RequestCount <= dailyLimit {
 		return ProRequest, true
 	}
@@ -186,18 +209,30 @@ func (du *DailyUsage) checkSuspiciousActivity(now time.Time, config RateLimitCon
 }
 
 // GetUsageInfo returns current usage information
-func (du *DailyUsage) GetUsageInfo() (int, time.Time) {
+func (du *DailyUsage) GetUsageInfo() (int, time.Time, int, time.Time) {
 	du.mutex.RLock()
 	defer du.mutex.RUnlock()
 
 	now := time.Now()
 
-	// Check if we need to reset (new day)
+	dailyCount := du.RequestCount
+	dailyReset := du.ResetTime
+	minuteCount := du.MinuteRequestCount
+	minuteReset := du.MinuteResetTime
+
+	// Check if we need to reset daily counter (new day)
 	if now.After(du.ResetTime) {
-		return 0, time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		dailyCount = 0
+		dailyReset = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 	}
 
-	return du.RequestCount, du.ResetTime
+	// Check if we need to reset minute counter (new minute)
+	if now.After(du.MinuteResetTime) {
+		minuteCount = 0
+		minuteReset = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
+	}
+
+	return dailyCount, dailyReset, minuteCount, minuteReset
 }
 
 // GetBlockingInfo returns current blocking status information
@@ -303,6 +338,8 @@ func (rl *RateLimiter) GetUsageStats() map[string]interface{} {
 		"blocked_users":        blockedUsers,
 		"recent_requests":      totalRecentRequests,
 		"cleanup_ttl":          rl.cleanupTTL.String(),
+		"requests_per_day":     defaultConfig.RequestsPerDay,
+		"requests_per_minute":  defaultConfig.RequestsPerMinute,
 		"suspicious_threshold": defaultConfig.SuspiciousThreshold,
 		"suspicious_window":    defaultConfig.SuspiciousWindow.String(),
 		"block_duration":       defaultConfig.BlockDuration.String(),
@@ -315,8 +352,6 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 	cfg := config
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log := logger.GetLogger("rate_limiter")
-
 		// Create rate limit key based on user ID (from auth) or IP address
 		key := getRateLimitKey(r)
 
@@ -326,48 +361,82 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		// Check and increment usage, get request type
 		requestType, allowed := usage.CheckAndIncrementUsage(cfg.RequestsPerDay, cfg)
 
-		// If request is blocked due to suspicious activity, return 429
+		// If request is blocked, return 429
 		if !allowed {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-RateLimit-Blocked", "true")
-			w.Header().Set("X-RateLimit-Block-Reason", "suspicious-activity")
+
+			// Get current minute usage to determine block reason
+			_, _, minuteCount, minuteReset := usage.GetUsageInfo()
+
+			var blockReason string
+			var errorMessage string
+			var retryAfter int
+
+			// Determine the reason for blocking
+			if minuteCount >= cfg.RequestsPerMinute {
+				blockReason = "per-minute-limit"
+				errorMessage = fmt.Sprintf("Too many requests - maximum %d requests per minute allowed", cfg.RequestsPerMinute)
+				retryAfter = int(time.Until(minuteReset).Seconds())
+			} else {
+				// Must be suspicious activity
+				blockReason = "suspicious-activity"
+				errorMessage = "Too many requests - suspicious activity detected"
+
+				// Get block info for suspicious activity
+				usage.mutex.RLock()
+				blockedUntil := usage.BlockedUntil
+				usage.mutex.RUnlock()
+				retryAfter = int(time.Until(blockedUntil).Seconds())
+			}
+
+			w.Header().Set("X-RateLimit-Block-Reason", blockReason)
 			w.WriteHeader(http.StatusTooManyRequests)
 
-			// Get block info
-			usage.mutex.RLock()
-			blockedUntil := usage.BlockedUntil
-			usage.mutex.RUnlock()
-
 			response := map[string]interface{}{
-				"error":         "Too many requests - suspicious activity detected",
-				"code":          "SUSPICIOUS_ACTIVITY_BLOCKED",
-				"blocked_until": blockedUntil.Format(time.RFC3339),
-				"retry_after":   int(time.Until(blockedUntil).Seconds()),
+				"error":       errorMessage,
+				"code":        "RATE_LIMIT_EXCEEDED",
+				"retry_after": retryAfter,
 			}
+
+			if blockReason == "per-minute-limit" {
+				response["reset_time"] = minuteReset.Format(time.RFC3339)
+			} else {
+				usage.mutex.RLock()
+				response["blocked_until"] = usage.BlockedUntil.Format(time.RFC3339)
+				usage.mutex.RUnlock()
+			}
+
 			json.NewEncoder(w).Encode(response)
 
 			// Log the blocked request
-			log.WarnWithFields("Request blocked due to suspicious activity", map[string]interface{}{
-				"key":           key,
-				"path":          r.URL.Path,
-				"blocked_until": blockedUntil.Format(time.RFC3339),
-				"user_agent":    r.Header.Get("User-Agent"),
-				"ip":            r.RemoteAddr,
-			})
+			log.Printf("Request blocked (%s) from %s for path %s", blockReason, key, r.URL.Path)
 			return
 		}
 
 		// Get current usage info for headers
-		currentCount, resetTime := usage.GetUsageInfo()
+		currentCount, resetTime, minuteCount, minuteReset := usage.GetUsageInfo()
 		remaining := cfg.RequestsPerDay - currentCount
 		if remaining < 0 {
 			remaining = 0
 		}
 
+		minuteRemaining := cfg.RequestsPerMinute - minuteCount
+		if minuteRemaining < 0 {
+			minuteRemaining = 0
+		}
+
+		// Log the request with basic info
+		log.Printf("[%s] %s %s - %s request (%d/%d daily, %d/%d per minute)",
+			key, r.Method, r.URL.Path, string(requestType), currentCount, cfg.RequestsPerDay, minuteCount, cfg.RequestsPerMinute)
+
 		// Add comprehensive rate limit headers
 		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
 		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+		w.Header().Set("X-RateLimit-Limit-Minute", strconv.Itoa(cfg.RequestsPerMinute))
+		w.Header().Set("X-RateLimit-Remaining-Minute", strconv.Itoa(minuteRemaining))
+		w.Header().Set("X-RateLimit-Reset-Minute", strconv.FormatInt(minuteReset.Unix(), 10))
 		w.Header().Set("X-Request-Type", string(requestType))
 		w.Header().Set("X-RateLimit-Used", strconv.Itoa(currentCount))
 
@@ -375,32 +444,21 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		var statusMessage string
 		if requestType == ProRequest {
 			if remaining == 1 {
-				statusMessage = "1 pro request remaining today"
+				statusMessage = fmt.Sprintf("1 pro request remaining today (%d/min remaining)", minuteRemaining)
 			} else {
-				statusMessage = fmt.Sprintf("%d pro requests remaining today", remaining)
+				statusMessage = fmt.Sprintf("%d pro requests remaining today (%d/min remaining)", remaining, minuteRemaining)
 			}
 		} else {
-			statusMessage = "All pro requests used - in free mode"
+			statusMessage = fmt.Sprintf("All pro requests used - in free mode (%d/min remaining)", minuteRemaining)
 		}
 		w.Header().Set("X-RateLimit-Status", statusMessage)
-
-		// Log the request with comprehensive information
-		log.InfoWithFields("Request processed", map[string]interface{}{
-			"key":          key,
-			"request_type": string(requestType),
-			"count":        currentCount,
-			"remaining":    remaining,
-			"daily_limit":  cfg.RequestsPerDay,
-			"reset_time":   resetTime.Format(time.RFC3339),
-			"path":         r.URL.Path,
-			"status":       statusMessage,
-		})
 
 		// Add request type to context for the handler to use
 		ctx := context.WithValue(r.Context(), RequestTypeContextKey, requestType)
 
 		// Continue to next handler
 		next.ServeHTTP(w, r.WithContext(ctx))
+
 	})
 }
 
