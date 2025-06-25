@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from prometheus_client import Counter, Histogram, Gauge
 from starlette_prometheus import PrometheusMiddleware, metrics
+from logging_utils import DailyLogger
 
 from router.prompt_router import PromptRouter
 
@@ -67,7 +68,7 @@ CONCURRENT_REQUESTS = Gauge(
 
 # Initialize router at startup
 router = PromptRouter()
-print("Router initialized at startup")
+DailyLogger().info("Router initialized at startup")
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -90,7 +91,7 @@ async def route_prompt_endpoint(request: PromptRequest):
     
     try:
         with LATENCY_HISTOGRAM.labels('/complete').time():
-            print(f"Processing prompt routing request: {len(request.prompt)} chars, type: {request.request_type}")
+            DailyLogger().info(f"Processing prompt routing request: {len(request.prompt)} chars, type: {request.request_type}")
             
             # Validate request_type
             if request.request_type not in ["pro", "free"]:
@@ -112,7 +113,7 @@ async def route_prompt_endpoint(request: PromptRequest):
             CONFIDENCE_GAUGE.set(metadata['confidence'])
             REQUEST_COUNT.labels('/complete', 'success').inc()
             
-            print(f"Routing completed: {primary_model} (primary), {secondary_model} (secondary), category: {metadata['predicted_category']}")
+            DailyLogger().info(f"Routing completed: {primary_model} (primary), {secondary_model} (secondary), category: {metadata['predicted_category']}")
             
             return PromptResponse(
                 primary_model=primary_model,
@@ -128,7 +129,7 @@ async def route_prompt_endpoint(request: PromptRequest):
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        print(f"Error processing request: {type(e).__name__}: {str(e)}")
+        DailyLogger().error(f"Error processing request: {type(e).__name__}: {str(e)}")
         REQUEST_COUNT.labels('/complete', 'error').inc()
         raise HTTPException(status_code=500, detail="Internal server error")
     

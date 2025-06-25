@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,7 @@ import (
 
 	"gateway/handlers"
 	"gateway/middleware"
+	"gateway/pkg/logger"
 
 	"github.com/joho/godotenv"
 )
@@ -23,18 +23,6 @@ func getEnvWithDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
-}
-
-// loggingMiddleware logs all incoming requests
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		log.Printf("→ %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
-
-		next.ServeHTTP(w, r)
-
-		log.Printf("← %s %s completed in %v", r.Method, r.URL.Path, time.Since(start))
-	})
 }
 
 // setupRoutes configures all the HTTP routes
@@ -85,26 +73,26 @@ func setupRoutes() http.Handler {
 	})
 
 	// Wrap with logging middleware to log ALL requests
-	return loggingMiddleware(mux)
+	return mux
 }
 
 func main() {
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: Error loading .env file: %v", err)
-		log.Printf("Continuing with system environment variables...")
+		logger.GetDailyLogger().Warn("Warning: Error loading .env file: %v", err)
+		logger.GetDailyLogger().Warn("Continuing with system environment variables...")
 	} else {
-		log.Printf("Successfully loaded .env file")
+		logger.GetDailyLogger().Info("Successfully loaded .env file")
 	}
 
 	// Set maximum number of CPUs to use
 	maxProcs := runtime.GOMAXPROCS(0)
-	log.Printf("Gateway server initializing with %d CPU cores", maxProcs)
+	logger.GetDailyLogger().Info("Gateway server initializing with %d CPU cores", maxProcs)
 
 	// Get port from environment
 	port := getEnvWithDefault("PORT", "8080")
 
-	log.Printf("Starting gateway server on port %s", port)
+	logger.GetDailyLogger().Info("Starting gateway server on port %s", port)
 
 	// Create HTTP server with optimizations
 	server := &http.Server{
@@ -127,15 +115,15 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Server listening on :%s", port)
+		logger.GetDailyLogger().Info("Server listening on :%s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("Server failed to start: %v", err)
+			logger.GetDailyLogger().Error("Server failed to start: %v", err)
 		}
 	}()
 
 	// Wait for interrupt signal
 	<-quit
-	log.Println("Server shutting down...")
+	logger.GetDailyLogger().Info("Server shutting down...")
 
 	// Create a timeout context for shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -143,8 +131,8 @@ func main() {
 
 	// Attempt graceful shutdown
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.GetDailyLogger().Error("Server forced to shutdown: %v", err)
 	} else {
-		log.Println("Server shutdown complete")
+		logger.GetDailyLogger().Info("Server shutdown complete")
 	}
 }

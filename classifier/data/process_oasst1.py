@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 from datasets import load_dataset
 from tqdm import tqdm
+from logging_utils import DailyLogger
 
 # Configuration
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
@@ -65,7 +66,7 @@ class OllamaScorer:
                 return any(self.model_name in name for name in model_names)
             return False
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            DailyLogger().error(f"Connection test failed: {e}")
             return False
     
     def score_prompt(self, prompt: str) -> Optional[str]:
@@ -92,11 +93,11 @@ class OllamaScorer:
                 result = response.json()
                 return self._parse_category(result.get('response', ''))
             else:
-                print(f"API error: {response.status_code} - {response.text}")
+                DailyLogger().error(f"API error: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"Error classifying prompt: {e}")
+            DailyLogger().error(f"Error classifying prompt: {e}")
             return None
     
     def _create_scoring_prompt(self, prompt: str) -> str:
@@ -141,11 +142,11 @@ Respond with ONLY the category name (no explanation, no other text):"""
                     return valid_category
             
             # Default fallback
-            print(f"Invalid category response: {response}, using 'conversation' as fallback")
+            DailyLogger().warning(f"Invalid category response: {response}, using 'conversation' as fallback")
             return "conversation"
             
         except Exception as e:
-            print(f"Error parsing category: {e}")
+            DailyLogger().error(f"Error parsing category: {e}")
             return "conversation"
 
 class DatasetProcessor:
@@ -160,7 +161,7 @@ class DatasetProcessor:
         
     def load_dataset(self) -> List[Dict]:
         """Load and filter the OASST1 dataset"""
-        print("Loading OpenAssistant/oasst1 dataset...")
+        DailyLogger().info("Loading OpenAssistant/oasst1 dataset...")
         
         try:
             dataset = load_dataset("OpenAssistant/oasst1", split="train")
@@ -173,11 +174,11 @@ class DatasetProcessor:
                         'text': item.get('text', '').strip(),
                     })
             
-            print(f"Loaded {len(prompts)} English prompts from dataset")
+            DailyLogger().info(f"Loaded {len(prompts)} English prompts from dataset")
             return prompts
             
         except Exception as e:
-            print(f"Error loading dataset: {e}")
+            DailyLogger().error(f"Error loading dataset: {e}")
             raise
     
     def load_checkpoint(self) -> Optional[ProcessingState]:
@@ -188,7 +189,7 @@ class DatasetProcessor:
                     data = json.load(f)
                     return ProcessingState(**data)
             except Exception as e:
-                print(f"Error loading checkpoint: {e}")
+                DailyLogger().error(f"Error loading checkpoint: {e}")
         return None
     
     def save_checkpoint(self, state: ProcessingState):
@@ -203,7 +204,7 @@ class DatasetProcessor:
                     'failed_prompts': state.failed_prompts
                 }, f)
         except Exception as e:
-            print(f"Error saving checkpoint: {e}")
+            DailyLogger().error(f"Error saving checkpoint: {e}")
     
     def calculate_eta(self, state: ProcessingState) -> str:
         """Calculate estimated time remaining"""
@@ -245,7 +246,7 @@ class DatasetProcessor:
                 }
                 results.append(result)
             else:
-                print(f"Failed to classify prompt {i} in batch {batch_num}")
+                DailyLogger().error(f"Failed to classify prompt {i} in batch {batch_num}")
         
         return results
     
@@ -270,12 +271,12 @@ class DatasetProcessor:
         """Main processing loop"""
         # Test Ollama connection
         if not self.scorer.test_connection():
-            print(f"Cannot connect to Ollama or model {MODEL_NAME} not found!")
-            print("Please ensure Ollama is running and the model is installed:")
-            print(f"  ollama pull {MODEL_NAME}")
+            DailyLogger().error(f"Cannot connect to Ollama or model {MODEL_NAME} not found!")
+            DailyLogger().warning("Please ensure Ollama is running and the model is installed:")
+            DailyLogger().warning(f"  ollama pull {MODEL_NAME}")
             return
         
-        print(f"Connected to Ollama with model: {MODEL_NAME}")
+        DailyLogger().info(f"Connected to Ollama with model: {MODEL_NAME}")
         
         # Load dataset
         prompts = self.load_dataset()
@@ -284,10 +285,10 @@ class DatasetProcessor:
         state = self.load_checkpoint()
         
         if state:
-            print(f"Resuming from checkpoint: {state.processed_count}/{state.total_prompts} processed")
+            DailyLogger().info(f"Resuming from checkpoint: {state.processed_count}/{state.total_prompts} processed")
             start_batch = state.current_batch
         else:
-            print("Starting fresh processing")
+            DailyLogger().info("Starting fresh processing")
             state = ProcessingState(
                 total_prompts=len(prompts),
                 processed_count=0,
@@ -339,10 +340,10 @@ class DatasetProcessor:
                 time.sleep(0.1)
         
         except KeyboardInterrupt:
-            print("Processing interrupted by user")
+            DailyLogger().warning("Processing interrupted by user")
             self.save_checkpoint(state)
         except Exception as e:
-            print(f"Processing error: {e}")
+            DailyLogger().error(f"Processing error: {e}")
             self.save_checkpoint(state)
             raise
         finally:
@@ -352,19 +353,19 @@ class DatasetProcessor:
         if state.processed_count >= len(prompts):
             if self.checkpoint_file.exists():
                 self.checkpoint_file.unlink()
-            print(f"Processing completed! Results saved to {self.output_file}")
-            print(f"Total prompts processed: {state.processed_count}")
+            DailyLogger().info(f"Processing completed! Results saved to {self.output_file}")
+            DailyLogger().info(f"Total prompts processed: {state.processed_count}")
 
 def main():
     """Main entry point"""
-    print("OpenAssistant OASST1 Dataset Processor")
-    print("=" * 50)
-    print(f"Model: {MODEL_NAME}")
-    print(f"Batch size: {BATCH_SIZE}")
-    print(f"Categories: {len(CATEGORIES)}")
-    print("Task: Single category classification")
-    print(f"Output: {OUTPUT_FILE}")
-    print()
+    DailyLogger().info("OpenAssistant OASST1 Dataset Processor")
+    DailyLogger().info("=" * 50)
+    DailyLogger().info(f"Model: {MODEL_NAME}")
+    DailyLogger().info(f"Batch size: {BATCH_SIZE}")
+    DailyLogger().info(f"Categories: {len(CATEGORIES)}")
+    DailyLogger().info("Task: Single category classification")
+    DailyLogger().info(f"Output: {OUTPUT_FILE}")
+    DailyLogger().info("")
     
     processor = DatasetProcessor()
     processor.run()
