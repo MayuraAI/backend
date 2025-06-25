@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"gateway/pkg/logger"
 	"net/http"
 	"strconv"
 	"sync"
@@ -410,7 +410,7 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 			json.NewEncoder(w).Encode(response)
 
 			// Log the blocked request
-			log.Printf("Request blocked (%s) from %s for path %s", blockReason, key, r.URL.Path)
+			logger.GetDailyLogger().Info("Request blocked", "reason", blockReason, "key", key, "path", r.URL.Path)
 			return
 		}
 
@@ -427,8 +427,7 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		}
 
 		// Log the request with basic info
-		log.Printf("[%s] %s %s - %s request (%d/%d daily, %d/%d per minute)",
-			key, r.Method, r.URL.Path, string(requestType), currentCount, cfg.RequestsPerDay, minuteCount, cfg.RequestsPerMinute)
+		logger.GetDailyLogger().Info("Request processed", "key", key, "method", r.Method, "path", r.URL.Path, "type", string(requestType), "count", currentCount, "daily_limit", cfg.RequestsPerDay, "minute_count", minuteCount, "minute_limit", cfg.RequestsPerMinute)
 
 		// Add comprehensive rate limit headers
 		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))

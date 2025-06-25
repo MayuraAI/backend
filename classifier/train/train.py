@@ -11,6 +11,7 @@ import pandas as pd
 from pathlib import Path
 from collections import Counter
 import csv
+from logging_utils import DailyLogger
 
 # Constants
 MODEL_NAME = "distilbert-base-uncased"
@@ -59,7 +60,7 @@ def load_data(data_path):
                     categories.append(category)
     
     except Exception as e:
-        print(f"Error reading CSV file: {e}")
+        DailyLogger().error(f"Error reading CSV file: {e}")
         raise
     
     if not texts:
@@ -73,8 +74,8 @@ def load_data(data_path):
     # Convert categories to numeric labels
     labels = [category_to_id[cat] for cat in categories]
     
-    print(f"Loaded {len(texts)} samples")
-    print(f"Categories found: {unique_categories}")
+    DailyLogger().info(f"Loaded {len(texts)} samples")
+    DailyLogger().info(f"Categories found: {unique_categories}")
     
     return texts, labels, category_to_id, id_to_category
 
@@ -123,35 +124,35 @@ def evaluate(model, dataloader, device):
 def main():
     # Set device
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    DailyLogger().info(f"Using device: {device}")
     
     # Load data
     data_path = '../data/oasst1_scored_prompts.csv'
     if not Path(data_path).exists():
-        print(f"Error: Data file not found at {data_path}")
-        print("Please run the OASST1 processing script first to generate the dataset.")
+        DailyLogger().error(f"Error: Data file not found at {data_path}")
+        DailyLogger().warning("Please run the OASST1 processing script first to generate the dataset.")
         return
     
     texts, labels, category_to_id, id_to_category = load_data(data_path)
-    print(f"Number of categories: {len(category_to_id)}")
-    print("Category distribution:")
+    DailyLogger().info(f"Number of categories: {len(category_to_id)}")
+    DailyLogger().info("Category distribution:")
     
     # Show category distribution
     category_counts = Counter([id_to_category[label] for label in labels])
     for cat, count in category_counts.most_common():
-        print(f"  {cat}: {count}")
+        DailyLogger().info(f"  {cat}: {count}")
     
     # Check if we have enough data for training
     if len(texts) < 100:
-        print("Warning: Very small dataset. Consider processing more data.")
+        DailyLogger().warning("Warning: Very small dataset. Consider processing more data.")
     
     # Split data
     train_texts, val_texts, train_labels, val_labels = train_test_split(
         texts, labels, test_size=TRAIN_TEST_SPLIT, random_state=42, stratify=labels
     )
     
-    print(f"\nTraining samples: {len(train_texts)}")
-    print(f"Validation samples: {len(val_texts)}")
+    DailyLogger().info(f"Training samples: {len(train_texts)}")
+    DailyLogger().info(f"Validation samples: {len(val_texts)}")
     
     # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -181,14 +182,14 @@ def main():
     
     # Training loop
     best_accuracy = 0
-    print("\nStarting training...")
+    DailyLogger().info("Starting training...")
     
     for epoch in range(EPOCHS):
-        print(f"\nEpoch {epoch + 1}/{EPOCHS}")
+        DailyLogger().info(f"Epoch {epoch + 1}/{EPOCHS}")
         
         # Train
         avg_train_loss = train_epoch(model, train_dataloader, optimizer, scheduler, device)
-        print(f"Average training loss: {avg_train_loss:.4f}")
+        DailyLogger().info(f"Average training loss: {avg_train_loss:.4f}")
         
         # Evaluate
         predictions, true_labels = evaluate(model, val_dataloader, device)
@@ -198,14 +199,14 @@ def main():
             target_names=list(category_to_id.keys()),
             digits=4
         )
-        print("\nValidation Results:")
-        print(report)
+        DailyLogger().info("Validation Results:")
+        DailyLogger().info(report)
         
         # Save best model
         accuracy = np.mean(np.array(predictions) == np.array(true_labels))
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            print(f"New best accuracy: {best_accuracy:.4f} - Saving model")
+            DailyLogger().info(f"New best accuracy: {best_accuracy:.4f} - Saving model")
             save_dir = Path("./best_model")
             save_dir.mkdir(exist_ok=True)
             model.save_pretrained(save_dir)
@@ -219,9 +220,9 @@ def main():
             with open(save_dir / 'category_mappings.json', 'w') as f:
                 json.dump(mappings, f, indent=2)
     
-    print("\nTraining completed!")
-    print(f"Best validation accuracy: {best_accuracy:.4f}")
-    print(f"Model saved to: ./best_model/")
+    DailyLogger().info("Training completed!")
+    DailyLogger().info(f"Best validation accuracy: {best_accuracy:.4f}")
+    DailyLogger().info(f"Model saved to: ./best_model/")
 
 if __name__ == "__main__":
     main() 
