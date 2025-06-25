@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"gateway/models"
+	"gateway/pkg/logger"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -438,7 +438,7 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	fmt.Fprint(w, msg)
 	flusher.Flush()
 
-	log.Printf("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
+	logger.GetDailyLogger().Info("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
 
 	return nil
 }

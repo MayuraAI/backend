@@ -7,7 +7,9 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -376,4 +378,67 @@ func InitFromEnv() {
 
 	Initialize(service, level, jsonFormat)
 	RedirectStandardLog()
+}
+
+type DailyLogger struct {
+	logger  *log.Logger
+	logFile *os.File
+	curDate string
+	mu      sync.Mutex
+}
+
+var (
+	dailyLoggerInstance *DailyLogger
+	dailyLoggerOnce     sync.Once
+)
+
+func GetDailyLogger() *DailyLogger {
+	dailyLoggerOnce.Do(func() {
+		dailyLoggerInstance = &DailyLogger{}
+		dailyLoggerInstance.rotateIfNeeded()
+	})
+	return dailyLoggerInstance
+}
+
+func (d *DailyLogger) rotateIfNeeded() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	curDate := time.Now().Format("2006-01-02")
+	if d.curDate == curDate && d.logFile != nil {
+		return
+	}
+	if d.logFile != nil {
+		d.logFile.Close()
+	}
+	os.MkdirAll("logs", 0755)
+	logPath := filepath.Join("logs", fmt.Sprintf("log-%s.log", curDate))
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	d.logFile = file
+	d.logger = log.New(file, "", log.LstdFlags|log.Lshortfile)
+	d.curDate = curDate
+}
+
+func (d *DailyLogger) logf(level string, format string, v ...interface{}) {
+	d.rotateIfNeeded()
+	msg := fmt.Sprintf("[%s] %s", level, fmt.Sprintf(format, v...))
+	d.logger.Output(3, msg)
+}
+
+func (d *DailyLogger) Info(format string, v ...interface{}) {
+	d.logf("INFO", format, v...)
+}
+
+func (d *DailyLogger) Warn(format string, v ...interface{}) {
+	d.logf("WARN", format, v...)
+}
+
+func (d *DailyLogger) Error(format string, v ...interface{}) {
+	d.logf("ERROR", format, v...)
+}
+
+func (d *DailyLogger) Debug(format string, v ...interface{}) {
+	d.logf("DEBUG", format, v...)
 }

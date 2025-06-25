@@ -8,6 +8,7 @@ import yaml
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import numpy as np
 import sys
+from logging_utils import DailyLogger
 
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
@@ -24,7 +25,7 @@ class PromptClassifier:
         """Round-robin pattern for multiple model instances."""
         global _model_instances
         if not _model_instances:
-            print(f"Creating {MAX_MODEL_INSTANCES} model instances")
+            DailyLogger().info(f"Creating {MAX_MODEL_INSTANCES} model instances")
             for _ in range(MAX_MODEL_INSTANCES):
                 instance = super(PromptClassifier, cls).__new__(cls)
                 instance._initialized = False
@@ -40,13 +41,13 @@ class PromptClassifier:
         if getattr(self, '_initialized', False):
             return
             
-        print("Initializing model instance")
+        DailyLogger().info("Initializing model instance")
         self.config = self._load_config(config_path)
         
         # Initialize model and tokenizer
         self._init_model()
         self._initialized = True
-        print("Model initialization complete")
+        DailyLogger().info("Model initialization complete")
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -60,7 +61,7 @@ class PromptClassifier:
         if not model_path.exists():
             raise ValueError(f"Model not found at {model_path}. Please train the model first.")
         
-        print(f"Loading model and tokenizer from {model_path}")
+        DailyLogger().info(f"Loading model and tokenizer from {model_path}")
         
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(str(model_path))
@@ -76,7 +77,7 @@ class PromptClassifier:
         self.id_to_label = config.id2label
         self.label_mapping = {v: int(k) for k, v in config.id2label.items()}
         
-        print(f"Model loaded on {self.device} with {len(self.label_mapping)} labels")
+        DailyLogger().info(f"Model loaded on {self.device} with {len(self.label_mapping)} labels")
 
     async def classify_prompt(self, text: str) -> Dict[str, float]:
         """
