@@ -2,8 +2,8 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"gateway/pkg/logger"
@@ -12,10 +12,20 @@ import (
 	"github.com/supabase-community/auth-go/types"
 )
 
-const (
-	supabaseProjectRef = "joqxsmypurgigczeyktl"
-	supabaseAnonKey    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcXhzbXlwdXJnaWdjemV5a3RsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MjE0NzIsImV4cCI6MjA2Mzk5NzQ3Mn0.kNIbZj7a4RVTgrvvm69-YuyrTalVxrZa32pidyMogxg"
-)
+// getSupabaseConfig returns Supabase configuration from environment variables
+func getSupabaseConfig() (projectRef, anonKey string) {
+	projectRef = os.Getenv("SUPABASE_PROJECT_REF")
+	if projectRef == "" {
+		projectRef = "joqxsmypurgigczeyktl" // Default fallback
+	}
+
+	anonKey = os.Getenv("SUPABASE_ANON_KEY")
+	if anonKey == "" {
+		anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcXhzbXlwdXJnaWdjemV5a3RsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg0MjE0NzIsImV4cCI6MjA2Mzk5NzQ3Mn0.kNIbZj7a4RVTgrvvm69-YuyrTalVxrZa32pidyMogxg" // Default fallback
+	}
+
+	return projectRef, anonKey
+}
 
 type supabaseContextKey string
 
@@ -52,7 +62,8 @@ func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 		tokenStr := parts[1]
 
 		// Create auth client and verify token
-		client := auth.New(supabaseProjectRef, supabaseAnonKey).WithToken(tokenStr)
+		projectRef, anonKey := getSupabaseConfig()
+		client := auth.New(projectRef, anonKey).WithToken(tokenStr)
 
 		user, err := client.GetUser()
 		if err != nil {
@@ -64,38 +75,6 @@ func SupabaseAuthMiddleware(next http.Handler) http.Handler {
 			w.Write([]byte(`{"error": "Invalid or expired token", "status": 401}`))
 			return
 		}
-
-		// Print user details as requested
-		log.InfoWithFields("User authenticated successfully", map[string]interface{}{
-			"user_id":            user.ID.String(),
-			"email":              user.Email,
-			"phone":              user.Phone,
-			"created_at":         user.CreatedAt,
-			"updated_at":         user.UpdatedAt,
-			"role":               user.Role,
-			"email_confirmed_at": user.EmailConfirmedAt,
-			"phone_confirmed_at": user.PhoneConfirmedAt,
-			"last_sign_in_at":    user.LastSignInAt,
-		})
-
-		// Log additional user details for debugging
-		fmt.Printf("=== Authenticated User Details ===\n")
-		fmt.Printf("User ID: %s\n", user.ID.String())
-		fmt.Printf("Email: %s\n", user.Email)
-		fmt.Printf("Phone: %s\n", user.Phone)
-		fmt.Printf("Created At: %s\n", user.CreatedAt)
-		fmt.Printf("Updated At: %s\n", user.UpdatedAt)
-		fmt.Printf("Role: %s\n", user.Role)
-		if user.EmailConfirmedAt != nil {
-			fmt.Printf("Email Confirmed At: %s\n", *user.EmailConfirmedAt)
-		}
-		if user.PhoneConfirmedAt != nil {
-			fmt.Printf("Phone Confirmed At: %s\n", *user.PhoneConfirmedAt)
-		}
-		if user.LastSignInAt != nil {
-			fmt.Printf("Last Sign In At: %s\n", *user.LastSignInAt)
-		}
-		fmt.Printf("==================================\n")
 
 		// Add the user and token to the request context
 		ctx := context.WithValue(r.Context(), SupabaseUserContextKey, user)

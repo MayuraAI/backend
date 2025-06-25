@@ -5,30 +5,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gateway/pkg/logger"
+	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	"gateway/middleware"
 )
 
 // ModelRequest represents the request to the model service
 type ModelRequest struct {
-	Prompt string `json:"prompt"`
+	Prompt      string `json:"prompt"`
+	RequestType string `json:"request_type"` // "pro" or "free"
 }
 
 // ModelResponse represents the response from the model service
 type ModelResponse struct {
-	Model    string                `json:"model"`
-	Metadata ModelResponseMetadata `json:"metadata"`
+	PrimaryModel              string                `json:"primary_model"`
+	PrimaryModelDisplayName   string                `json:"primary_model_display_name"`
+	SecondaryModel            string                `json:"secondary_model"`
+	SecondaryModelDisplayName string                `json:"secondary_model_display_name"`
+	DefaultModel              string                `json:"default_model"`
+	DefaultModelDisplayName   string                `json:"default_model_display_name"`
+	Metadata                  ModelResponseMetadata `json:"metadata"`
 }
 
 type ModelResponseMetadata struct {
 	ProcessingTime        float64               `json:"processing_time"`
 	PredictedCategory     string                `json:"predicted_category"`
 	CategoryProbabilities map[string]float64    `json:"category_probabilities"`
+	RequestType           string                `json:"request_type"`
+	AvailableModels       int                   `json:"available_models"`
 	ModelScores           map[string]ModelScore `json:"model_scores"`
-	SelectedModel         string                `json:"selected_model"`
+	PrimaryModel          string                `json:"primary_model"`
+	SecondaryModel        string                `json:"secondary_model"`
+	DefaultModel          string                `json:"default_model"`
 	Confidence            float64               `json:"confidence"`
 }
 
@@ -38,6 +50,11 @@ type ModelScore struct {
 	Cost              float64 `json:"cost"`
 	NormalizedCost    float64 `json:"normalized_cost"`
 	FinalScore        float64 `json:"final_score"`
+	Tier              string  `json:"tier"`
+	Provider          string  `json:"provider"`
+	DisplayName       string  `json:"display_name"`
+	ProviderModelName string  `json:"provider_model_name"`
+	IsThinkingModel   bool    `json:"is_thinking_model"`
 }
 
 // Circuit breaker states
@@ -143,23 +160,28 @@ func (cb *CircuitBreaker) setState(state CircuitState) {
 	cb.state = state
 }
 
-// CallModelService calls the local model service with optimizations
-func CallModelService(prompt string) (ModelResponse, error) {
-	startTime := time.Now()
-
-	// // Check circuit breaker
-	// if !classifierCircuit.canExecute() {
-	// 	return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
-	// }
+// CallModelService calls the local model service with optimizations and request type
+func CallModelService(prompt string, requestType middleware.RequestType) (ModelResponse, error) {
+	// Check circuit breaker
+	if !classifierCircuit.canExecute() {
+		return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
+	}
 
 	// If circuit breaker is in half-open state, transition it
-	// if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
-	// 	classifierCircuit.setState(HalfOpen)
-	// }
+	if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
+		classifierCircuit.setState(HalfOpen)
+	}
+
+	// Convert RequestType to string
+	requestTypeStr := "free"
+	if requestType == middleware.ProRequest {
+		requestTypeStr = "pro"
+	}
 
 	// Prepare the request
 	reqBody := ModelRequest{
-		Prompt: prompt,
+		Prompt:      prompt,
+		RequestType: requestTypeStr,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -174,7 +196,7 @@ func CallModelService(prompt string) (ModelResponse, error) {
 	classifierURL := getClassifierURL()
 	req, err := http.NewRequestWithContext(ctx, "POST", classifierURL+"/complete", bytes.NewBuffer(jsonData))
 	if err != nil {
-		// classifierCircuit.onFailure()
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error creating request: %v", err)
 	}
 
@@ -185,42 +207,36 @@ func CallModelService(prompt string) (ModelResponse, error) {
 	// Make the request using optimized client
 	resp, err := classifierClient.Do(req)
 	if err != nil {
-		// classifierCircuit.onFailure()
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error calling model service: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// classifierCircuit.onFailure()
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("classifier service returned status %d", resp.StatusCode)
 	}
 
 	// Parse the response
 	var modelResp ModelResponse
 	if err := json.NewDecoder(resp.Body).Decode(&modelResp); err != nil {
-		// classifierCircuit.onFailure()
+		classifierCircuit.onFailure()
 		return ModelResponse{}, fmt.Errorf("error decoding response: %v", err)
 	}
 
 	// Success - update circuit breaker
-	// classifierCircuit.onSuccess()
+	classifierCircuit.onSuccess()
 
-	// Log the response details
-	logModelResponse(modelResp, time.Since(startTime))
+	// Log the response for debugging
+	log.Printf("Model service response: %s (primary), %s (secondary)", modelResp.PrimaryModel, modelResp.SecondaryModel)
 
 	return modelResp, nil
 }
 
-// logModelResponse logs the model response details in a formatted way
-func logModelResponse(resp ModelResponse, requestTime time.Duration) {
-	log := logger.GetLogger("model.service")
-	log.InfoWithFields("Model service response", map[string]interface{}{
-		"selected_model":     resp.Metadata.SelectedModel,
-		"confidence":         resp.Metadata.Confidence,
-		"predicted_category": resp.Metadata.PredictedCategory,
-		"processing_time_ms": resp.Metadata.ProcessingTime * 1000,
-		"request_time_ms":    requestTime.Milliseconds(),
-	})
+// CallModelServiceWithFallback calls model service with fallback to default for backward compatibility
+func CallModelServiceWithFallback(prompt string) (ModelResponse, error) {
+	// Default to free request type for backward compatibility
+	return CallModelService(prompt, middleware.FreeRequest)
 }
 
 // GetCircuitBreakerStats returns circuit breaker statistics for monitoring
