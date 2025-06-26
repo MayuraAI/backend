@@ -20,26 +20,29 @@ model:
   name: "distilbert-base-uncased"
 
 weights:
-  quality: 0.6
-  cost: 0.4
+  quality: 0.8
+  cost: 0.2
 
 model_scores:
   models:
-    gemini-2.5-flash-preview:
+
+# PRO
+
+    gemini-2.5-flash-preview: # reasoning & translation
       provider: "gemini"
       provider_model_name: "gemini-2.5-flash-preview-04-17"
       display_name: "Gemini 2.5 Flash Preview"
       tier: "pro"
-      cost_per_request: 0.15
+      cost_per_request: 0.1
       is_default: false
       is_thinking_model: false
       conversation: 0.980
       classification: 0.950
       roleplay: 0.970
       data_analysis: 0.970
-      translation: 0.940
+      translation: 2.00
       problem_solving: 0.990
-      reasoning: 0.990
+      reasoning: 2.00
       code_generation: 0.970
       writing: 0.970
       summarization: 0.960
@@ -48,38 +51,38 @@ model_scores:
       research: 0.980
       extraction: 0.960
 
-    gemini-2.5-pro-preview:
+    gemini-2.5-pro-preview: # code generation
       provider: "gemini"
       provider_model_name: "gemini-2.5-pro-preview-06-05"
       display_name: "Gemini 2.5 Pro Preview"
       tier: "pro"
-      cost_per_request: 0.02
+      cost_per_request: 0.1
       is_default: false
       is_thinking_model: true
-      conversation: 0.980
-      classification: 0.960
-      roleplay: 0.970
-      data_analysis: 0.970
-      translation: 0.940
+      conversation: 0.1
+      classification: 0.1
+      roleplay: 0.1
+      data_analysis: 0.1
+      translation: 0.1
       problem_solving: 0.990
       reasoning: 0.990
-      code_generation: 0.970
-      writing: 0.980
-      summarization: 0.960
-      math: 0.990
-      creative: 0.970
+      code_generation: 2.00
+      writing: 0.1
+      summarization: 0.1
+      math: 0.99
+      creative: 0.1
       research: 0.980
-      extraction: 0.970
+      extraction: 0.1
 
-    gemini-2.0-flash:
+    gemini-2.0-flash: # conversation
       provider: "gemini"
       provider_model_name: "gemini-2.0-flash"
       display_name: "Gemini 2.0 Flash"
       tier: "pro"
-      cost_per_request: 0.01
+      cost_per_request: 0.1
       is_default: true
       is_thinking_model: false
-      conversation: 0.960
+      conversation: 2.00
       classification: 0.910
       roleplay: 0.960
       data_analysis: 0.950
@@ -94,12 +97,12 @@ model_scores:
       research: 0.950
       extraction: 0.920
 
-    gemini-2.0-flash-lite:
+    gemini-2.0-flash-lite: # summarization
       provider: "gemini"
       provider_model_name: "gemini-2.0-flash-lite"
       display_name: "Gemini 2.0 Flash Lite"
       tier: "pro"
-      cost_per_request: 0.008
+      cost_per_request: 0.1
       is_default: false
       is_thinking_model: false
       conversation: 0.950
@@ -111,41 +114,18 @@ model_scores:
       reasoning: 0.980
       code_generation: 0.960
       writing: 0.940
-      summarization: 0.920
+      summarization: 2.00
       math: 0.980
       creative: 0.940
       research: 0.950
       extraction: 0.910
-
-    gemini-1.5-flash:
-      provider: "gemini"
-      provider_model_name: "gemini-1.5-flash"
-      display_name: "Gemini 1.5 Flash"
-      tier: "pro"
-      cost_per_request: 0.008
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.920
-      classification: 0.890
-      roleplay: 0.910
-      data_analysis: 0.900
-      translation: 0.850
-      problem_solving: 0.930
-      reasoning: 0.950
-      code_generation: 0.880
-      writing: 0.870
-      summarization: 0.880
-      math: 0.950
-      creative: 0.870
-      research: 0.880
-      extraction: 0.860
 
     gemini-1.5-pro:
       provider: "gemini"
       provider_model_name: "gemini-1.5-pro"
       display_name: "Gemini 1.5 Pro"
       tier: "pro"
-      cost_per_request: 0.01
+      cost_per_request: 0.1
       is_default: false
       is_thinking_model: false
       conversation: 0.960
@@ -163,7 +143,9 @@ model_scores:
       research: 0.940
       extraction: 0.900
 
-    kimi-dev-72b:
+# FREE
+
+    kimi-dev-72b: # writing
       provider: "openrouter"
       provider_model_name: "moonshotai/kimi-dev-72b:free"
       display_name: "Kimi Dev 72B"
@@ -179,62 +161,14 @@ model_scores:
       problem_solving: 0.920
       reasoning: 0.900
       code_generation: 0.940
-      writing: 0.920
+      writing: 2.00
       summarization: 0.900
       math: 0.890
       creative: 0.890
       research: 0.900
       extraction: 0.900
 
-    # NOT WORKING
-    # sarvam-m:
-    #   provider: "openrouter"
-    #   provider_model_name: "sarvamai/sarvam-m:free"
-    #   display_name: "Sarvam M"
-    #   tier: "free"
-    #   cost_per_request: 0.0
-    #   is_default: false
-    #   is_thinking_model: false
-    #   conversation: 0.920
-    #   classification: 0.850
-    #   roleplay: 0.880
-    #   data_analysis: 0.870
-    #   translation: 0.890
-    #   problem_solving: 0.900
-    #   reasoning: 0.920
-    #   code_generation: 0.900
-    #   writing: 0.880
-    #   summarization: 0.870
-    #   math: 0.960
-    #   creative: 0.900
-    #   research: 0.880
-    #   extraction: 0.850
-
-    # NOT WORKING
-    # devstral-small:
-    #   provider: "openrouter"
-    #   provider_model_name: "mistralai/devstral-small:free"
-    #   display_name: "Devstral Small"
-    #   tier: "free"
-    #   cost_per_request: 0.0
-    #   is_default: false
-    #   is_thinking_model: false
-    #   conversation: 0.860
-    #   classification: 0.840
-    #   roleplay: 0.850
-    #   data_analysis: 0.830
-    #   translation: 0.870
-    #   problem_solving: 0.850
-    #   reasoning: 0.840
-    #   code_generation: 0.900
-    #   writing: 0.850
-    #   summarization: 0.840
-    #   math: 0.830
-    #   creative: 0.840
-    #   research: 0.840
-    #   extraction: 0.830
-
-    llama-3.3-nemotron-super:
+    llama-3.3-nemotron-super: # summarization
       provider: "openrouter"
       provider_model_name: "nvidia/llama-3.3-nemotron-super-49b-v1:free"
       display_name: "Llama 3.3 Nemotron Super 49B"
@@ -251,105 +185,13 @@ model_scores:
       reasoning: 0.940
       code_generation: 0.950
       writing: 0.930
-      summarization: 0.920
+      summarization: 2.00
       math: 0.940
       creative: 0.920
       research: 0.920
       extraction: 0.900
 
-    llama-4-maverick:
-      provider: "openrouter"
-      provider_model_name: "meta-llama/llama-4-maverick:free"
-      display_name: "Llama 4 Maverick"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.890
-      classification: 0.860
-      roleplay: 0.880
-      data_analysis: 0.840
-      translation: 0.900
-      problem_solving: 0.870
-      reasoning: 0.880
-      code_generation: 0.920
-      writing: 0.870
-      summarization: 0.880
-      math: 0.860
-      creative: 0.870
-      research: 0.850
-      extraction: 0.870
-
-    llama-4-scout:
-      provider: "openrouter"
-      provider_model_name: "meta-llama/llama-4-scout:free"
-      display_name: "Llama 4 Scout"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.880
-      classification: 0.850
-      roleplay: 0.870
-      data_analysis: 0.840
-      translation: 0.900
-      problem_solving: 0.870
-      reasoning: 0.880
-      code_generation: 0.910
-      writing: 0.870
-      summarization: 0.880
-      math: 0.860
-      creative: 0.870
-      research: 0.850
-      extraction: 0.860
-
-    gemma2-9b-it:
-      provider: "groq"
-      provider_model_name: "gemma2-9b-it"
-      display_name: "Gemma 2 9B IT"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.880
-      classification: 0.850
-      roleplay: 0.870
-      data_analysis: 0.830
-      translation: 0.890
-      problem_solving: 0.860
-      reasoning: 0.870
-      code_generation: 0.900
-      writing: 0.860
-      summarization: 0.870
-      math: 0.850
-      creative: 0.860
-      research: 0.840
-      extraction: 0.850
-
-    llama-3.1-8b:
-      provider: "groq"
-      provider_model_name: "llama-3.1-8b-instant"
-      display_name: "Llama 3.1 8B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: true
-      is_thinking_model: false
-      conversation: 0.890
-      classification: 0.860
-      roleplay: 0.880
-      data_analysis: 0.840
-      translation: 0.900
-      problem_solving: 0.870
-      reasoning: 0.880
-      code_generation: 0.950
-      writing: 0.870
-      summarization: 0.880
-      math: 0.860
-      creative: 0.870
-      research: 0.850
-      extraction: 0.860
-
-    llama-3.3-70b-versatile:
+    llama-3.3-70b-versatile: # problem_solving
       provider: "groq"
       provider_model_name: "llama-3.3-70b-versatile"
       display_name: "Llama 3.3 70B Versatile"
@@ -362,7 +204,7 @@ model_scores:
       roleplay: 0.910
       data_analysis: 0.880
       translation: 0.930
-      problem_solving: 0.900
+      problem_solving: 2.00
       reasoning: 0.910
       code_generation: 0.940
       writing: 0.900
@@ -372,76 +214,7 @@ model_scores:
       research: 0.880
       extraction: 0.880
 
-    llama3-70b-8192:
-      provider: "groq"
-      provider_model_name: "llama3-70b-8192"
-      display_name: "Llama 3 70B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: true
-      is_thinking_model: false
-      conversation: 0.910
-      classification: 0.880
-      roleplay: 0.900
-      data_analysis: 0.870
-      translation: 0.920
-      problem_solving: 0.890
-      reasoning: 0.900
-      code_generation: 0.930
-      writing: 0.890
-      summarization: 0.900
-      math: 0.880
-      creative: 0.880
-      research: 0.870
-      extraction: 0.870
-
-    llama3-8b-8192:
-      provider: "groq"
-      provider_model_name: "llama3-8b-8192"
-      display_name: "Llama 3 8B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.870
-      classification: 0.840
-      roleplay: 0.860
-      data_analysis: 0.820
-      translation: 0.880
-      problem_solving: 0.850
-      reasoning: 0.860
-      code_generation: 0.900
-      writing: 0.850
-      summarization: 0.860
-      math: 0.840
-      creative: 0.850
-      research: 0.830
-      extraction: 0.840
-
-    qwen-qwq-32b:
-      provider: "groq"
-      provider_model_name: "qwen-qwq-32b"
-      display_name: "Qwen QWQ 32B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.92
-      classification: 0.91
-      roleplay: 0.91
-      data_analysis: 0.92
-      translation: 0.91
-      problem_solving: 0.97
-      reasoning: 0.98
-      code_generation: 0.95
-      writing: 0.92
-      summarization: 0.91
-      math: 0.97
-      creative: 0.92
-      research: 0.93
-      extraction: 0.91
-
-    qwen-qwen3-32b:
+    qwen-qwen3-32b: # conversation
       provider: "groq"
       provider_model_name: "qwen/qwen3-32b"
       display_name: "Qwen 3 32B"
@@ -456,7 +229,7 @@ model_scores:
       translation: 0.92
       problem_solving: 0.98
       reasoning: 0.99
-      code_generation: 0.96
+      code_generation: 2.00
       writing: 0.93
       summarization: 0.92
       math: 0.98
@@ -467,157 +240,19 @@ model_scores:
     deepseek-deepseek-r1-0528-qwen3-8b:
       provider: "openrouter"
       provider_model_name: "deepseek/deepseek-r1-0528-qwen3-8b:free"
-      display_name: "DeepSeek R1 Qwen3 8B"
+      display_name: "DeepSeek R1 Qwen3"
       tier: "free"
       cost_per_request: 0.0
       is_default: false
       is_thinking_model: false
-      conversation: 0.90
-      classification: 0.89
-      roleplay: 0.89
-      data_analysis: 0.90
-      translation: 0.89
-      problem_solving: 0.95
-      reasoning: 0.96
-      code_generation: 0.93
-      writing: 0.90
-      summarization: 0.89
-      math: 0.95
-      creative: 0.90
-      research: 0.91
-      extraction: 0.89
-
-    deepseek-deepseek-r1-0528:
-      provider: "openrouter"
-      provider_model_name: "deepseek/deepseek-r1-0528:free"
-      display_name: "DeepSeek R1 0528"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.91
-      classification: 0.90
-      roleplay: 0.90
-      data_analysis: 0.91
-      translation: 0.90
-      problem_solving: 0.96
-      reasoning: 0.97
-      code_generation: 0.94
-      writing: 0.91
-      summarization: 0.90
-      math: 0.96
-      creative: 0.91
-      research: 0.92
-      extraction: 0.90
-
-    microsoft-phi-4-reasoning-plus:
-      provider: "openrouter"
-      provider_model_name: "microsoft/phi-4-reasoning-plus:free"
-      display_name: "Phi-4 Reasoning Plus"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.92
-      classification: 0.91
-      roleplay: 0.91
-      data_analysis: 0.92
-      translation: 0.91
-      problem_solving: 0.97
-      reasoning: 0.98
-      code_generation: 0.95
-      writing: 0.92
-      summarization: 0.91
-      math: 0.97
-      creative: 0.92
-      research: 0.93
-      extraction: 0.91
-
-    microsoft-phi-4-reasoning:
-      provider: "openrouter"
-      provider_model_name: "microsoft/phi-4-reasoning:free"
-      display_name: "Phi-4 Reasoning"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.91
-      classification: 0.90
-      roleplay: 0.90
-      data_analysis: 0.91
-      translation: 0.90
-      problem_solving: 0.96
-      reasoning: 0.97
-      code_generation: 0.94
-      writing: 0.91
-      summarization: 0.90
-      math: 0.96
-      creative: 0.91
-      research: 0.92
-      extraction: 0.90
-
-    qwen-qwen3-30b-a3b:
-      provider: "openrouter"
-      provider_model_name: "qwen/qwen3-30b-a3b:free"
-      display_name: "Qwen 3 30B A3B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.93
-      classification: 0.92
-      roleplay: 0.92
-      data_analysis: 0.93
-      translation: 0.92
-      problem_solving: 0.98
-      reasoning: 0.99
-      code_generation: 0.96
-      writing: 0.93
-      summarization: 0.92
-      math: 0.98
-      creative: 0.93
-      research: 0.94
-      extraction: 0.92
-
-    qwen-qwen3-14b:
-      provider: "openrouter"
-      provider_model_name: "qwen/qwen3-14b:free"
-      display_name: "Qwen 3 14B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.91
-      classification: 0.90
-      roleplay: 0.90
-      data_analysis: 0.91
-      translation: 0.90
-      problem_solving: 0.96
-      reasoning: 0.97
-      code_generation: 0.94
-      writing: 0.91
-      summarization: 0.90
-      math: 0.96
-      creative: 0.91
-      research: 0.92
-      extraction: 0.90
-
-    qwen-qwen3-235b-a22b:
-      provider: "openrouter"
-      provider_model_name: "qwen/qwen3-235b-a22b:free"
-      display_name: "Qwen 3 235B A22B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: true
-      conversation: 0.96
-      classification: 0.95
-      roleplay: 0.95
-      data_analysis: 0.96
+      conversation: 0.00
+      classification: 0.00
+      roleplay: 0.00
+      data_analysis: 0.00
       translation: 0.95
       problem_solving: 1.00
-      reasoning: 1.00
-      code_generation: 0.98
+      reasoning: 2.00
+      code_generation: 5.00
       writing: 0.96
       summarization: 0.95
       math: 1.00
@@ -625,18 +260,18 @@ model_scores:
       research: 0.97
       extraction: 0.95
 
-    deepseek-deepseek-v3-base:
+    deepseek-deepseek-r1-0528:
       provider: "openrouter"
-      provider_model_name: "deepseek/deepseek-v3-base:free"
-      display_name: "DeepSeek V3 Base"
+      provider_model_name: "deepseek/deepseek-r1-0528:free"
+      display_name: "DeepSeek R1"
       tier: "free"
       cost_per_request: 0.0
       is_default: false
       is_thinking_model: false
-      conversation: 0.91
-      classification: 0.90
-      roleplay: 0.90
-      data_analysis: 0.91
+      conversation: 0.00
+      classification: 0.0
+      roleplay: 0.0
+      data_analysis: 0.0
       translation: 0.90
       problem_solving: 0.96
       reasoning: 0.97
@@ -648,140 +283,397 @@ model_scores:
       research: 0.92
       extraction: 0.90
 
-    deepseek-deepseek-chat-v3-0324:
-      provider: "openrouter"
-      provider_model_name: "deepseek/deepseek-chat-v3-0324:free"
-      display_name: "DeepSeek Chat V3 0324"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.92
-      classification: 0.91
-      roleplay: 0.91
-      data_analysis: 0.92
-      translation: 0.91
-      problem_solving: 0.97
-      reasoning: 0.98
-      code_generation: 0.95
-      writing: 0.92
-      summarization: 0.91
-      math: 0.97
-      creative: 0.92
-      research: 0.93
-      extraction: 0.91
+    # qwen-qwen3-235b-a22b: # code generation & reasoning
+    #   provider: "openrouter"
+    #   provider_model_name: "qwen/qwen3-235b-a22b:free"
+    #   display_name: "Qwen 3 235B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.00
+    #   classification: 0.00
+    #   roleplay: 0.00
+    #   data_analysis: 0.00
+    #   translation: 0.95
+    #   problem_solving: 1.00
+    #   reasoning: 2.00
+    #   code_generation: 5.00
+    #   writing: 0.96
+    #   summarization: 0.95
+    #   math: 1.00
+    #   creative: 0.96
+    #   research: 0.97
+    #   extraction: 0.95
 
-    deepseek-deepseek-r1:
-      provider: "openrouter"
-      provider_model_name: "deepseek/deepseek-r1:free"
-      display_name: "DeepSeek R1 (OpenRouter)"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.91
-      classification: 0.90
-      roleplay: 0.90
-      data_analysis: 0.91
-      translation: 0.90
-      problem_solving: 0.96
-      reasoning: 0.97
-      code_generation: 0.94
-      writing: 0.91
-      summarization: 0.90
-      math: 0.96
-      creative: 0.91
-      research: 0.92
-      extraction: 0.90
 
-    deepseek-deepseek-chat:
-      provider: "openrouter"
-      provider_model_name: "deepseek/deepseek-chat:free"
-      display_name: "DeepSeek Chat (OpenRouter)"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.92
-      classification: 0.91
-      roleplay: 0.91
-      data_analysis: 0.92
-      translation: 0.91
-      problem_solving: 0.97
-      reasoning: 0.98
-      code_generation: 0.95
-      writing: 0.92
-      summarization: 0.91
-      math: 0.97
-      creative: 0.92
-      research: 0.93
-      extraction: 0.91
 
-    allam-2-7b:
-      provider: "groq"
-      provider_model_name: "allam-2-7b"
-      display_name: "Allam 2 7B (Groq)"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.88
-      classification: 0.87
-      roleplay: 0.87
-      data_analysis: 0.88
-      translation: 0.87
-      problem_solving: 0.93
-      reasoning: 0.94
-      code_generation: 0.91
-      writing: 0.88
-      summarization: 0.87
-      math: 0.93
-      creative: 0.88
-      research: 0.89
-      extraction: 0.87
 
-    compound-beta:
-      provider: "groq"
-      provider_model_name: "compound-beta"
-      display_name: "Compound Beta (Groq)"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.89
-      classification: 0.88
-      roleplay: 0.88
-      data_analysis: 0.89
-      translation: 0.88
-      problem_solving: 0.94
-      reasoning: 0.95
-      code_generation: 0.92
-      writing: 0.89
-      summarization: 0.88
-      math: 0.94
-      creative: 0.89
-      research: 0.90
-      extraction: 0.88
 
-    compound-beta-mini:
-      provider: "groq"
-      provider_model_name: "compound-beta-mini"
-      display_name: "Compound Beta Mini (Groq)"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.87
-      classification: 0.86
-      roleplay: 0.86
-      data_analysis: 0.87
-      translation: 0.86
-      problem_solving: 0.92
-      reasoning: 0.93
-      code_generation: 0.90
-      writing: 0.87
-      summarization: 0.86
-      math: 0.92
-      creative: 0.87
-      research: 0.88
-      extraction: 0.86
+    # llama-4-maverick: # conversation
+    #   provider: "openrouter"
+    #   provider_model_name: "meta-llama/llama-4-maverick:free"
+    #   display_name: "Llama 4 Maverick"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 2.00
+    #   classification: 0.860
+    #   roleplay: 0.880
+    #   data_analysis: 0.840
+    #   translation: 0.900
+    #   problem_solving: 0.870
+    #   reasoning: 0.880
+    #   code_generation: 0.920
+    #   writing: 0.870
+    #   summarization: 0.880
+    #   math: 0.860
+    #   creative: 0.870
+    #   research: 0.850
+    #   extraction: 0.870
+
+    # llama-4-scout:
+    #   provider: "openrouter"
+    #   provider_model_name: "meta-llama/llama-4-scout:free"
+    #   display_name: "Llama 4 Scout"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.00
+    #   classification: 0.850
+    #   roleplay: 0.870
+    #   data_analysis: 0.840
+    #   translation: 0.900
+    #   problem_solving: 0.870
+    #   reasoning: 0.880
+    #   code_generation: 0.910
+    #   writing: 0.870
+    #   summarization: 0.880
+    #   math: 0.860
+    #   creative: 0.870
+    #   research: 0.850
+    #   extraction: 0.860
+
+    # llama3-70b-8192: # conversation & writing
+    #   provider: "groq"
+    #   provider_model_name: "llama3-70b-8192"
+    #   display_name: "Llama 3 70B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: true
+    #   is_thinking_model: false
+    #   conversation: 2.00
+    #   classification: 0.880
+    #   roleplay: 0.900
+    #   data_analysis: 0.870
+    #   translation: 0.920
+    #   problem_solving: 0.890
+    #   reasoning: 0.900
+    #   code_generation: 0.930
+    #   writing: 0.890
+    #   summarization: 0.900
+    #   math: 0.880
+    #   creative: 0.880
+    #   research: 0.870
+    #   extraction: 0.870
+
+    # gemma2-9b-it:
+    #   provider: "groq"
+    #   provider_model_name: "gemma2-9b-it"
+    #   display_name: "Gemma 2 9B IT"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.880
+    #   classification: 0.850
+    #   roleplay: 0.870
+    #   data_analysis: 0.830
+    #   translation: 0.890
+    #   problem_solving: 0.860
+    #   reasoning: 0.870
+    #   code_generation: 0.900
+    #   writing: 0.860
+    #   summarization: 0.870
+    #   math: 0.850
+    #   creative: 0.860
+    #   research: 0.840
+    #   extraction: 0.850
+
+    # gemini-1.5-flash:
+    #   provider: "gemini"
+    #   provider_model_name: "gemini-1.5-flash"
+    #   display_name: "Gemini 1.5 Flash"
+    #   tier: "pro"
+    #   cost_per_request: 0.008
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.920
+    #   classification: 0.890
+    #   roleplay: 0.910
+    #   data_analysis: 0.900
+    #   translation: 0.850
+    #   problem_solving: 0.930
+    #   reasoning: 0.950
+    #   code_generation: 0.880
+    #   writing: 0.870
+    #   summarization: 0.880
+    #   math: 0.950
+    #   creative: 0.870
+    #   research: 0.880
+    #   extraction: 0.860
+
+    # llama-3.1-8b:
+    #   provider: "groq"
+    #   provider_model_name: "llama-3.1-8b-instant"
+    #   display_name: "Llama 3.1 8B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: true
+    #   is_thinking_model: false
+    #   conversation: 0.890
+    #   classification: 0.860
+    #   roleplay: 0.880
+    #   data_analysis: 0.840
+    #   translation: 0.900
+    #   problem_solving: 0.870
+    #   reasoning: 0.880
+    #   code_generation: 0.950
+    #   writing: 0.870
+    #   summarization: 0.880
+    #   math: 0.860
+    #   creative: 0.870
+    #   research: 0.850
+    #   extraction: 0.860
+
+    # llama3-8b-8192:
+    #   provider: "groq"
+    #   provider_model_name: "llama3-8b-8192"
+    #   display_name: "Llama 3 8B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.870
+    #   classification: 0.840
+    #   roleplay: 0.860
+    #   data_analysis: 0.820
+    #   translation: 0.880
+    #   problem_solving: 0.850
+    #   reasoning: 0.860
+    #   code_generation: 0.900
+    #   writing: 0.850
+    #   summarization: 0.860
+    #   math: 0.840
+    #   creative: 0.850
+    #   research: 0.830
+    #   extraction: 0.840
+
+    # qwen-qwq-32b:
+    #   provider: "groq"
+    #   provider_model_name: "qwen-qwq-32b"
+    #   display_name: "Qwen QWQ 32B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.92
+    #   classification: 0.91
+    #   roleplay: 0.91
+    #   data_analysis: 0.92
+    #   translation: 0.91
+    #   problem_solving: 0.97
+    #   reasoning: 0.98
+    #   code_generation: 0.95
+    #   writing: 0.92
+    #   summarization: 0.91
+    #   math: 0.97
+    #   creative: 0.92
+    #   research: 0.93
+    #   extraction: 0.91
+
+    # microsoft-phi-4-reasoning-plus:
+    #   provider: "openrouter"
+    #   provider_model_name: "microsoft/phi-4-reasoning-plus:free"
+    #   display_name: "Phi-4 Reasoning Plus"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.92
+    #   classification: 0.91
+    #   roleplay: 0.91
+    #   data_analysis: 0.92
+    #   translation: 0.91
+    #   problem_solving: 0.97
+    #   reasoning: 0.98
+    #   code_generation: 0.95
+    #   writing: 0.92
+    #   summarization: 0.91
+    #   math: 0.97
+    #   creative: 0.92
+    #   research: 0.93
+    #   extraction: 0.91
+
+    # microsoft-phi-4-reasoning:
+    #   provider: "openrouter"
+    #   provider_model_name: "microsoft/phi-4-reasoning:free"
+    #   display_name: "Phi-4 Reasoning"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.91
+    #   classification: 0.90
+    #   roleplay: 0.90
+    #   data_analysis: 0.91
+    #   translation: 0.90
+    #   problem_solving: 0.96
+    #   reasoning: 0.97
+    #   code_generation: 0.94
+    #   writing: 0.91
+    #   summarization: 0.90
+    #   math: 0.96
+    #   creative: 0.91
+    #   research: 0.92
+      # extraction: 0.90
+
+    # qwen-qwen3-30b-a3b:
+    #   provider: "openrouter"
+    #   provider_model_name: "qwen/qwen3-30b-a3b:free"
+    #   display_name: "Qwen 3 30B A3B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.93
+    #   classification: 0.92
+    #   roleplay: 0.92
+    #   data_analysis: 0.93
+    #   translation: 0.92
+    #   problem_solving: 0.98
+    #   reasoning: 0.99
+    #   code_generation: 0.96
+    #   writing: 0.93
+    #   summarization: 0.92
+    #   math: 0.98
+    #   creative: 0.93
+    #   research: 0.94
+    #   extraction: 0.92
+
+    # qwen-qwen3-14b:
+    #   provider: "openrouter"
+    #   provider_model_name: "qwen/qwen3-14b:free"
+    #   display_name: "Qwen 3 14B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.91
+    #   classification: 0.90
+    #   roleplay: 0.90
+    #   data_analysis: 0.91
+    #   translation: 0.90
+    #   problem_solving: 0.96
+    #   reasoning: 0.97
+    #   code_generation: 0.94
+    #   writing: 0.91
+    #   summarization: 0.90
+    #   math: 0.96
+    #   creative: 0.91
+    #   research: 0.92
+    #   extraction: 0.90
+
+    # deepseek-deepseek-v3-base:
+    #   provider: "openrouter"
+    #   provider_model_name: "deepseek/deepseek-v3-base:free"
+    #   display_name: "DeepSeek V3 Base"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.91
+    #   classification: 0.90
+    #   roleplay: 0.90
+    #   data_analysis: 0.91
+    #   translation: 0.90
+    #   problem_solving: 0.96
+    #   reasoning: 0.97
+    #   code_generation: 0.94
+    #   writing: 0.91
+    #   summarization: 0.90
+    #   math: 0.96
+    #   creative: 0.91
+    #   research: 0.92
+    #   extraction: 0.90
+
+    # deepseek-deepseek-chat-v3-0324:
+    #   provider: "openrouter"
+    #   provider_model_name: "deepseek/deepseek-chat-v3-0324:free"
+    #   display_name: "DeepSeek Chat V3 0324"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.92
+    #   classification: 0.91
+    #   roleplay: 0.91
+    #   data_analysis: 0.92
+    #   translation: 0.91
+    #   problem_solving: 0.97
+    #   reasoning: 0.98
+    #   code_generation: 0.95
+    #   writing: 0.92
+    #   summarization: 0.91
+    #   math: 0.97
+    #   creative: 0.92
+    #   research: 0.93
+    #   extraction: 0.91
+
+    # deepseek-deepseek-r1:
+    #   provider: "openrouter"
+    #   provider_model_name: "deepseek/deepseek-r1:free"
+    #   display_name: "DeepSeek R1 (OpenRouter)"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.91
+    #   classification: 0.90
+    #   roleplay: 0.90
+    #   data_analysis: 0.91
+    #   translation: 0.90
+    #   problem_solving: 0.96
+    #   reasoning: 0.97
+    #   code_generation: 0.94
+    #   writing: 0.91
+    #   summarization: 0.90
+    #   math: 0.96
+    #   creative: 0.91
+    #   research: 0.92
+    #   extraction: 0.90
+
+    # deepseek-deepseek-chat:
+    #   provider: "openrouter"
+    #   provider_model_name: "deepseek/deepseek-chat:free"
+    #   display_name: "DeepSeek Chat (OpenRouter)"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.92
+    #   classification: 0.91
+    #   roleplay: 0.91
+    #   data_analysis: 0.92
+    #   translation: 0.91
+    #   problem_solving: 0.97
+    #   reasoning: 0.98
+    #   code_generation: 0.95
+    #   writing: 0.92
+    #   summarization: 0.91
+    #   math: 0.97
+    #   creative: 0.92
+    #   research: 0.93
+    #   extraction: 0.91

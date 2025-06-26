@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,21 +29,21 @@ func setupRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Metrics endpoint for monitoring
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	// mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	// 	if r.Method != http.MethodGet {
+	// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// 		return
+	// 	}
 
-		w.Header().Set("Content-Type", "application/json")
-		metrics := handlers.GetMetrics()
+	// 	w.Header().Set("Content-Type", "application/json")
+	// 	metrics := handlers.GetMetrics()
 
-		// Add rate limiting stats
-		rateLimitStats := middleware.GetRateLimitStats()
-		metrics["rate_limiting"] = rateLimitStats
+	// 	// Add rate limiting stats
+	// 	rateLimitStats := middleware.GetRateLimitStats()
+	// 	metrics["rate_limiting"] = rateLimitStats
 
-		json.NewEncoder(w).Encode(metrics)
-	})
+	// 	json.NewEncoder(w).Encode(metrics)
+	// })
 
 	// Protected route with rate limiting and Supabase auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {

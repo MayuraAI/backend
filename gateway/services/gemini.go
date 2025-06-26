@@ -156,6 +156,9 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
 	}
 
+	// Add clear instructions about handling context vs current prompt
+	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question"
+
 	if finalSystemPrompt != "" {
 		systemInstruction = &GeminiSystemInstruction{
 			Parts: []struct {
@@ -166,7 +169,7 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		}
 	}
 
-	// Add previous messages (up to the last 4)
+	// Add previous messages as context (up to the last 4)
 	// Filter out thinking blocks
 	filteredMessages := []models.ChatMessage{}
 	for _, msg := range previousMessages {
@@ -174,19 +177,34 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 			filteredMessages = append(filteredMessages, msg)
 		}
 	}
+
 	if len(filteredMessages) > 0 {
 		// Limit to last 4 messages
 		startIdx := 0
 		if len(filteredMessages) > 4 {
 			startIdx = len(filteredMessages) - 4
 		}
+
 		for _, msg := range filteredMessages[startIdx:] {
+			role := "user"
+			if msg.Role != "user" {
+				role = "model"
+			}
+
+			// Add context prefix to make it clear this is previous conversation
+			contextPrefix := ""
+			if msg.Role == "user" {
+				contextPrefix = "[PREVIOUS CONTEXT] User: "
+			} else {
+				contextPrefix = "[PREVIOUS CONTEXT] Assistant: "
+			}
+
 			contents = append(contents, GeminiContent{
-				Role: msg.Role,
+				Role: role,
 				Parts: []struct {
 					Text string `json:"text"`
 				}{
-					{Text: msg.Content},
+					{Text: contextPrefix + msg.Content},
 				},
 			})
 		}
@@ -203,12 +221,18 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 	// Add the current prompt as a user message if needed
 	if addCurrentPrompt {
+		// Add clear marking for current request
+		currentPromptText := prompt
+		if len(filteredMessages) > 0 {
+			currentPromptText = "[CURRENT REQUEST] " + prompt
+		}
+
 		contents = append(contents, GeminiContent{
 			Role: "user",
 			Parts: []struct {
 				Text string `json:"text"`
 			}{
-				{Text: prompt},
+				{Text: currentPromptText},
 			},
 		})
 	}
@@ -361,7 +385,7 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		// Handle thinking state transitions and send appropriate markers only for thinking models
 		if isThinkingModel {
 			if isThought && !inThinking {
-				// Starting to think - send thinking start marker
+				// Starting to think - send thinking start marker only once
 				thinkStartResponse := models.Response{
 					Message: "◁think▷",
 					Type:    "chunk",
@@ -373,7 +397,7 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 				}
 				inThinking = true
 			} else if !isThought && inThinking {
-				// Finished thinking - send thinking end marker
+				// Send thinking end marker
 				thinkEndResponse := models.Response{
 					Message: "◁/think▷",
 					Type:    "chunk",
@@ -387,8 +411,9 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 			}
 		}
 
-		// Send chunk to handler if there's content
+		// Handle content based on whether it's thinking or regular content
 		if chunkText != "" {
+			// Send content chunks immediately - both thinking and regular content
 			chunkResponse := models.Response{
 				Message: chunkText,
 				Type:    "chunk",
@@ -408,18 +433,6 @@ func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 
 		// Check if done
 		if isFinal {
-			// If we're still in thinking mode when finishing, close it (only for thinking models)
-			if isThinkingModel && inThinking {
-				thinkEndResponse := models.Response{
-					Message: "◁/think▷",
-					Type:    "chunk",
-				}
-				msg, err := models.FormatSSEMessage(thinkEndResponse)
-				if err == nil {
-					fmt.Fprint(w, msg)
-					flusher.Flush()
-				}
-			}
 			break
 		}
 	}

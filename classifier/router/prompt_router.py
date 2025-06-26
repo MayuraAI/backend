@@ -2,10 +2,11 @@
 Prompt router that selects the best model based on classification results.
 """
 import time
-from typing import Dict, Tuple, Any, Optional, List
+from typing import Dict, Tuple, Any, Optional
 from pathlib import Path
 import sys
 from logging_utils import DailyLogger
+import re
 
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
@@ -15,6 +16,29 @@ if str(parent_dir) not in sys.path:
 from router.model import PromptClassifier
 # i = 0
 class PromptRouter:
+    _KEYWORDS = {
+        'math': {'calculate', 'solve', 'equation', 'integral', 'derivative', r'\d+'},
+        'code_generation': {'import ', 'def ', 'class ', 'function', 'return ', 'print(', 'console.log', 'var ', 'let ', 'const '},
+        'translation': {'translate', 'in spanish', 'in french', 'into german', 'to english', 'traduce', 'übersetze'},
+        'summarization': {'summarize', 'summary', 'condense', 'tl;dr'},
+        'extraction': {'extract', 'entities', 'fields', 'find all', 'parse'},
+        'classification': {'classify', 'what category', 'which class', 'label'},
+        'problem_solving': {'troubleshoot', 'fix', 'issue', 'error', 'debug', 'problem', 'why won’t'},
+        'reasoning': {'why', 'how', 'step by step', 'reasoning', 'think about'},
+        'data_analysis': {'data', 'plot', 'chart', 'visualize', 'csv', 'dataset', 'statistics', 'mean', 'median'},
+        'research': {'research', 'study', 'analyze', 'compare', 'investigate', 'literature'},
+        'writing': {'write an essay', 'draft', 'compose', 'letter', 'email', 'blog post', 'article'},
+        'creative': {'story', 'poem', 'joke', 'imagine', 'creative', 'generate a poem', 'write a song'},
+        'roleplay': {'you are', 'roleplay', 'act as', 'character', 'in character'},
+        'conversation': {'hi', 'hello', 'how are you', 'chat with me', 'tell me about yourself'}
+    }
+
+    # Build regex patterns from keyword sets
+    _PATTERNS: Dict[str, re.Pattern] = {
+        category: re.compile('|'.join(re.escape(k) for k in kws), re.IGNORECASE)
+        for category, kws in _KEYWORDS.items()
+    }
+
     def __init__(self, config_path: str = "config/config.yaml"):
         """Initialize the prompt router."""
         self.classifier = PromptClassifier(config_path)
@@ -122,11 +146,11 @@ class PromptRouter:
             model_tier = model_data.get('tier', 'free')
             
             if request_type == 'pro':
-                # Pro users get access to both pro and free models
+                # Pro users get access to only pro models
                 if model_tier == 'pro':
                     filtered_models[model_name] = model_data
             elif request_type == 'free':
-                # Free users only get free models
+                # Free users get access to only free models
                 if model_tier == 'free':
                     filtered_models[model_name] = model_data
         
@@ -204,21 +228,32 @@ class PromptRouter:
         return normalized_scores
 
     def _apply_simple_prompt_rules(self, prompt: str) -> Optional[Tuple[str, Dict[str, float]]]:
-        """Apply simple heuristic rules for certain prompt patterns."""
-        prompt_lower = prompt.lower()
-        
-        # Math and calculation patterns
-        if any(keyword in prompt_lower for keyword in ['calculate', 'solve', 'math', 'equation', '=', '+', '-', '*', '/', 'derivative', 'integral']):
-            return 'math', {'math': 0.95, 'reasoning': 0.05}
-        
-        # Code generation patterns
-        if any(keyword in prompt_lower for keyword in ['code', 'function', 'class', 'import', 'def ', 'return', 'print(', 'console.log', 'var ', 'let ', 'const ']):
-            return 'code_generation', {'code_generation': 0.9, 'problem_solving': 0.1}
-        
-        # Research patterns
-        if any(keyword in prompt_lower for keyword in ['research', 'study', 'analyze', 'compare', 'investigate', 'literature']):
-            return 'research', {'research': 0.8, 'writing': 0.2}
-        
+        """Apply heuristic rules for prompt classification."""
+        # Check each category in priority order
+        # Primary weight 0.9, secondary 0.1 to a closely related category where applicable
+        checks = [
+            ('math', {'math': 0.95, 'reasoning': 0.05}),
+            ('code_generation', {'code_generation': 0.9, 'problem_solving': 0.1}),
+            ('translation', {'translation': 0.9, 'writing': 0.1}),
+            ('summarization', {'summarization': 0.9, 'writing': 0.1}),
+            ('extraction', {'extraction': 0.9, 'classification': 0.1}),
+            ('classification', {'classification': 0.9, 'reasoning': 0.1}),
+            ('problem_solving', {'problem_solving': 0.9, 'reasoning': 0.1}),
+            ('reasoning', {'reasoning': 0.95, 'problem_solving': 0.05}),
+            ('data_analysis', {'data_analysis': 0.9, 'research': 0.1}),
+            ('research', {'research': 0.85, 'writing': 0.15}),
+            ('writing', {'writing': 0.9, 'creative': 0.1}),
+            ('creative', {'creative': 0.9, 'writing': 0.1}),
+            ('roleplay', {'roleplay': 0.9, 'conversation': 0.1}),
+            ('conversation', {'conversation': 0.9, 'roleplay': 0.1})
+        ]
+
+        for category, weights in checks:
+            pattern = self._PATTERNS[category]
+            if pattern.search(prompt):
+                return category, weights
+
+        # No rule matched
         return None
 
     async def route_prompt(self, prompt: str, request_type: str = "free") -> Dict[str, Any]:
@@ -316,12 +351,16 @@ class PromptRouter:
                 filtered_models = {list(self.model_scores.keys())[0]: list(self.model_scores.values())[0]}
         
         # Try simple rules first
-        simple_result = self._apply_simple_prompt_rules(prompt)
+        # simple_result = self._apply_simple_prompt_rules(prompt)
+        simple_result = None
         if simple_result:
             predicted_category, category_probs = simple_result
         else:
             # Use ML classification
             category_probs = await self.classifier.classify_prompt(prompt)
+            # log category probs
+            for category, prob in category_probs.items():
+                DailyLogger().info(f"Category: {category}, Probability: {prob}")
             predicted_category = max(category_probs, key=category_probs.get)
         
         # Get dynamic weights based on task importance
@@ -330,6 +369,10 @@ class PromptRouter:
         # Calculate model scores
         model_scores = self._calculate_model_scores(category_probs, filtered_models)
         normalized_scores = self._normalize_scores(model_scores, quality_weight, cost_weight)
+
+        # log every model scores in each category
+        for model, scores in model_scores.items():
+            DailyLogger().info(f"Model: {model}, Quality Score: {scores['quality_score']}, Cost: {scores['cost']}")
         
         # Sort models by final score (descending)
         sorted_models = sorted(
@@ -353,7 +396,7 @@ class PromptRouter:
             'classification_method': 'rule_based' if simple_result else 'ml_classification'
         }
         
-        DailyLogger().info(f"Routing completed - Category: {predicted_category}, Primary: {primary_model}, Secondary: {secondary_model}")
+        DailyLogger().info(f"Routing completed - Category: {predicted_category}, Primary: {primary_model}, Secondary: {secondary_model} - Classification Method: {metadata['classification_method']}")
         
         return {
             'primary_model': primary_model,
