@@ -145,14 +145,37 @@ model_scores:
 
 # FREE
 
-    kimi-dev-72b: # writing
-      provider: "openrouter"
-      provider_model_name: "moonshotai/kimi-dev-72b:free"
-      display_name: "Kimi Dev 72B"
+    # kimi-dev-72b:
+    #   provider: "openrouter"
+    #   provider_model_name: "moonshotai/kimi-dev-72b:free"
+    #   display_name: "Kimi Dev 72B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: true
+    #   conversation: 0.930
+    #   classification: 0.880
+    #   roleplay: 0.900
+    #   data_analysis: 0.890
+    #   translation: 0.930
+    #   problem_solving: 0.920
+    #   reasoning: 0.900
+    #   code_generation: 0.940
+    #   writing: 0.5
+    #   summarization: 0.900
+    #   math: 0.890
+    #   creative: 0.890
+    #   research: 0.900
+    #   extraction: 0.900
+
+    gemma2-9b-it:
+      provider: "groq"
+      provider_model_name: "gemma2-9b-it"
+      display_name: "Gemma 2 9B"
       tier: "free"
       cost_per_request: 0.0
       is_default: false
-      is_thinking_model: true
+      is_thinking_model: false
       conversation: 0.930
       classification: 0.880
       roleplay: 0.900
@@ -166,29 +189,6 @@ model_scores:
       math: 0.890
       creative: 0.890
       research: 0.900
-      extraction: 0.900
-
-    llama-3.3-nemotron-super: # summarization
-      provider: "openrouter"
-      provider_model_name: "nvidia/llama-3.3-nemotron-super-49b-v1:free"
-      display_name: "Llama 3.3 Nemotron Super 49B"
-      tier: "free"
-      cost_per_request: 0.0
-      is_default: false
-      is_thinking_model: false
-      conversation: 0.940
-      classification: 0.900
-      roleplay: 0.920
-      data_analysis: 0.920
-      translation: 0.930
-      problem_solving: 0.930
-      reasoning: 0.940
-      code_generation: 0.950
-      writing: 0.930
-      summarization: 2.00
-      math: 0.940
-      creative: 0.920
-      research: 0.920
       extraction: 0.900
 
     llama-3.3-70b-versatile: # problem_solving
@@ -244,7 +244,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
-      is_thinking_model: false
+      is_thinking_model: true
       conversation: 0.00
       classification: 0.00
       roleplay: 0.00
@@ -253,7 +253,7 @@ model_scores:
       problem_solving: 1.00
       reasoning: 2.00
       code_generation: 5.00
-      writing: 0.96
+      writing: 1.50
       summarization: 0.95
       math: 1.00
       creative: 0.96
@@ -267,7 +267,7 @@ model_scores:
       tier: "free"
       cost_per_request: 0.0
       is_default: false
-      is_thinking_model: false
+      is_thinking_model: true
       conversation: 0.00
       classification: 0.0
       roleplay: 0.0
@@ -282,6 +282,29 @@ model_scores:
       creative: 0.91
       research: 0.92
       extraction: 0.90
+
+    # llama-3.3-nemotron-super: # summarization
+    #   provider: "openrouter"
+    #   provider_model_name: "nvidia/llama-3.3-nemotron-super-49b-v1:free"
+    #   display_name: "Llama 3.3 Nemotron Super 49B"
+    #   tier: "free"
+    #   cost_per_request: 0.0
+    #   is_default: false
+    #   is_thinking_model: false
+    #   conversation: 0.940
+    #   classification: 0.900
+    #   roleplay: 0.920
+    #   data_analysis: 0.920
+    #   translation: 0.930
+    #   problem_solving: 0.930
+    #   reasoning: 0.940
+    #   code_generation: 0.950
+    #   writing: 0.930
+    #   summarization: 2.00
+    #   math: 0.940
+    #   creative: 0.920
+    #   research: 0.920
+    #   extraction: 0.900
 
     # qwen-qwen3-235b-a22b: # code generation & reasoning
     #   provider: "openrouter"
@@ -379,28 +402,7 @@ model_scores:
     #   research: 0.870
     #   extraction: 0.870
 
-    # gemma2-9b-it:
-    #   provider: "groq"
-    #   provider_model_name: "gemma2-9b-it"
-    #   display_name: "Gemma 2 9B IT"
-    #   tier: "free"
-    #   cost_per_request: 0.0
-    #   is_default: false
-    #   is_thinking_model: false
-    #   conversation: 0.880
-    #   classification: 0.850
-    #   roleplay: 0.870
-    #   data_analysis: 0.830
-    #   translation: 0.890
-    #   problem_solving: 0.860
-    #   reasoning: 0.870
-    #   code_generation: 0.900
-    #   writing: 0.860
-    #   summarization: 0.870
-    #   math: 0.850
-    #   creative: 0.860
-    #   research: 0.840
-    #   extraction: 0.850
+
 
     # gemini-1.5-flash:
     #   provider: "gemini"

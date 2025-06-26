@@ -122,7 +122,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 	}
 
 	// Add clear instructions about handling context vs current prompt
-	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question"
+	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question, else don't use it or even talk about it"
 
 	if finalSystemPrompt != "" {
 		messages = append(messages, OpenRouterMessage{
