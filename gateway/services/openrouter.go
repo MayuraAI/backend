@@ -121,6 +121,9 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
 	}
 
+	// Add clear instructions about handling context vs current prompt
+	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question, else don't use it or even talk about it"
+
 	if finalSystemPrompt != "" {
 		messages = append(messages, OpenRouterMessage{
 			Role:    "system",
@@ -128,7 +131,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 		})
 	}
 
-	// Add previous messages (up to the last 4)
+	// Add previous messages as context (up to the last 4)
 	// Filter out thinking blocks
 	filteredMessages := []models.ChatMessage{}
 	for _, msg := range previousMessages {
@@ -136,15 +139,25 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 			filteredMessages = append(filteredMessages, msg)
 		}
 	}
+
 	if len(filteredMessages) > 0 {
 		startIdx := 0
 		if len(filteredMessages) > 4 {
 			startIdx = len(filteredMessages) - 4
 		}
+
 		for _, msg := range filteredMessages[startIdx:] {
+			// Add context prefix to make it clear this is previous conversation
+			contextPrefix := ""
+			if msg.Role == "user" {
+				contextPrefix = "[PREVIOUS CONTEXT] User: "
+			} else {
+				contextPrefix = "[PREVIOUS CONTEXT] Assistant: "
+			}
+
 			messages = append(messages, OpenRouterMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: contextPrefix + msg.Content,
 			})
 		}
 	}
@@ -160,9 +173,15 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 
 	// Add the current prompt as a user message if needed
 	if addCurrentPrompt {
+		// Add clear marking for current request
+		currentPromptText := prompt
+		if len(filteredMessages) > 0 {
+			currentPromptText = "[CURRENT REQUEST] " + prompt
+		}
+
 		messages = append(messages, OpenRouterMessage{
 			Role:    "user",
-			Content: prompt,
+			Content: currentPromptText,
 		})
 	}
 
@@ -251,6 +270,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 			if data == "[DONE]" {
 				// If we're still in reasoning mode when finishing, close it (only for thinking models)
 				if isThinkingModel && inReasoning {
+					// Send reasoning end marker
 					reasonEndResponse := models.Response{
 						Message: "◁/think▷",
 						Type:    "chunk",
@@ -281,7 +301,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 				// Handle reasoning state transitions and send appropriate markers only for thinking models
 				if isThinkingModel {
 					if reasoning != "" && !inReasoning {
-						// Starting to reason - send thinking start marker
+						// Starting to reason - send thinking start marker only once
 						reasonStartResponse := models.Response{
 							Message: "◁think▷",
 							Type:    "chunk",
@@ -293,7 +313,7 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 						}
 						inReasoning = true
 					} else if reasoning == "" && content != "" && inReasoning {
-						// Finished reasoning - send thinking end marker
+						// Send thinking end marker
 						reasonEndResponse := models.Response{
 							Message: "◁/think▷",
 							Type:    "chunk",
@@ -307,24 +327,14 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 					}
 				}
 
-				// Send reasoning content if present (only for thinking models)
+				// Send reasoning content immediately if present
 				if reasoning != "" && isThinkingModel {
-					// Send reasoning chunk
-					reasonStartResponse := models.Response{
-						Message: "◁think▷",
-						Type:    "chunk",
-					}
-					msg, err := models.FormatSSEMessage(reasonStartResponse)
-					if err == nil {
-						fmt.Fprint(w, msg)
-						flusher.Flush()
-					}
 					reasoningResponse := models.Response{
 						Message: reasoning,
 						Type:    "chunk",
 					}
 
-					msg, err = models.FormatSSEMessage(reasoningResponse)
+					msg, err := models.FormatSSEMessage(reasoningResponse)
 					if err != nil {
 						return fmt.Errorf("error formatting reasoning chunk: %v", err)
 					}
