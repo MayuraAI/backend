@@ -17,8 +17,7 @@ func SetupProfileRoutes(mux *http.ServeMux, apiVersion string) {
 	// Profile routes
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/user/", apiVersion), handleProfileByUserID)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/users/", apiVersion), handleProfilesByUserID)
-	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/check/", apiVersion), handleCheckUsernameAvailabilityGET)
-	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/check", apiVersion), handleCheckUsernameAvailability)
+	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/check", apiVersion), handleUsernameCheckCombined)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/", apiVersion), handleGetUsernameByUserID)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/", apiVersion), handleProfileOperations)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles", apiVersion), handleCreateProfile)
@@ -36,6 +35,9 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
 		return
 	}
+	logger := logger.GetDailyLogger()
+	logger.Debug("handleProfileByUserID", "userID", userID)
+	logger.Debug("handleProfileByUserID", "r.URL.Path", r.URL.Path)
 
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
@@ -46,7 +48,7 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 		// For now, we'll return a single profile as an array since we don't have GetProfilesByUserID
 		profile, err := aws.GetProfileByUserID(ctx, client, userID)
 		if err != nil {
-			logger.GetDailyLogger().Error("Error getting profile by user ID: %v", err)
+			logger.Error("Error getting profile by user ID: %v", err)
 			sendAPIErrorResponse(w, "Failed to get profiles", http.StatusInternalServerError)
 			return
 		}
@@ -54,11 +56,16 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+
+	logger.Debug("getting profile by user ID")
 	// Single profile with auto-create logic
 	profile, err := aws.GetProfileByUserID(ctx, client, userID)
+	logger.Debug("profile", "profile", profile)
+	logger.Debug("profile", "err", err)
 	if err != nil {
 		// If profile doesn't exist, create one
 		if strings.Contains(err.Error(), "not found") {
+			logger.Debug("profile not found, creating profile")
 			// Generate a unique username
 			baseUsername := fmt.Sprintf("user_%s", userID[:8])
 			finalUsername := baseUsername
@@ -68,7 +75,7 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 			for counter < 100 {
 				available, checkErr := aws.CheckUsernameAvailable(ctx, client, finalUsername, "")
 				if checkErr != nil {
-					logger.GetDailyLogger().Error("Error checking username availability: %v", checkErr)
+					logger.Error("Error checking username availability: %v", checkErr)
 					sendAPIErrorResponse(w, "Failed to create profile", http.StatusInternalServerError)
 					return
 				}
@@ -81,6 +88,8 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 				finalUsername = fmt.Sprintf("%s_%d", baseUsername, counter)
 			}
 
+			logger.Debug("finalUsername", "finalUsername", finalUsername)
+
 			newProfile := aws.Profile{
 				UserID:         userID,
 				CreatedAt:      time.Now(),
@@ -91,9 +100,13 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 				Username:       finalUsername,
 			}
 
+			logger.Debug("newProfile", "newProfile", newProfile)
+
 			createdProfile, createErr := aws.CreateProfile(ctx, client, newProfile)
+			logger.Debug("createdProfile", "createdProfile", createdProfile)
+			logger.Debug("createErr", "createErr", createErr)
 			if createErr != nil {
-				logger.GetDailyLogger().Error("Error creating profile: %v", createErr)
+				logger.Error("Error creating profile: %v", createErr)
 				sendAPIErrorResponse(w, "Failed to create profile", http.StatusInternalServerError)
 				return
 			}
@@ -101,7 +114,7 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		logger.GetDailyLogger().Error("Error getting profile by user ID: %v", err)
+		logger.Error("Error getting profile by user ID: %v", err)
 		sendAPIErrorResponse(w, "Failed to get profile", http.StatusInternalServerError)
 		return
 	}
@@ -109,16 +122,48 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, profile, http.StatusOK)
 }
 
-// handleCheckUsernameAvailabilityGET handles GET /v1/profiles/username/check/{username}?exclude_user_id={userId}
+// handleProfileCombined handles both collection and individual profile operations
+func handleProfileCombined(w http.ResponseWriter, r *http.Request) {
+	// Extract potential profile ID from path
+	profileID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/", APIVersion))
+
+	// If no profile ID, this is a collection operation
+	if profileID == "" {
+		// Handle collection operations (POST to create)
+		if r.Method == http.MethodPost {
+			handleCreateProfile(w, r)
+		} else {
+			sendAPIErrorResponse(w, "Method not allowed for collection", http.StatusMethodNotAllowed)
+		}
+	} else {
+		// Handle individual profile operations
+		handleProfileOperations(w, r)
+	}
+}
+
+// handleUsernameCheckCombined handles both GET and POST requests for username checking
+func handleUsernameCheckCombined(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleCheckUsernameAvailabilityGET(w, r)
+	case http.MethodPost:
+		handleCheckUsernameAvailability(w, r)
+	default:
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleCheckUsernameAvailabilityGET handles GET /v1/profiles/username/check?username={username}&exclude_user_id={userId}
 func handleCheckUsernameAvailabilityGET(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	username := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/username/check/", APIVersion))
+	// Get username from query parameters
+	username := r.URL.Query().Get("username")
 	if username == "" {
-		sendAPIErrorResponse(w, "Username is required", http.StatusBadRequest)
+		sendAPIErrorResponse(w, "Username query parameter is required", http.StatusBadRequest)
 		return
 	}
 

@@ -28,6 +28,20 @@ func getEnvWithDefault(key, defaultValue string) string {
 func setupRoutes() http.Handler {
 	mux := http.NewServeMux()
 
+	// Setup all API routes (profiles, chats, messages)
+	handlers.SetupAPIRoutes(mux)
+
+	// Health check endpoint (no auth required)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "healthy", "message": "Server is running"}`))
+	})
+
 	// Metrics endpoint for monitoring
 	// mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 	// 	if r.Method != http.MethodGet {
@@ -45,17 +59,19 @@ func setupRoutes() http.Handler {
 	// 	json.NewEncoder(w).Encode(metrics)
 	// })
 
-	// Protected route with rate limiting and Supabase auth middleware - only allow POST requests
+	// Protected route with rate limiting and Firebase auth middleware - only allow POST requests
 	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Apply rate limiting first, then authentication middleware
-		middleware.SupabaseAuthMiddleware(
-			middleware.RateLimitMiddleware(
-				http.HandlerFunc(handlers.ClientHandler),
-				middleware.GetDefaultConfig(),
+		// Apply CORS, then rate limiting, then authentication middleware
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				middleware.RateLimitMiddleware(
+					http.HandlerFunc(handlers.ClientHandler),
+					middleware.GetDefaultConfig(),
+				),
 			),
 		).ServeHTTP(w, r)
 	})
@@ -66,13 +82,16 @@ func setupRoutes() http.Handler {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Apply authentication middleware (rate limiting not needed for status check)
-		middleware.SupabaseAuthMiddleware(
-			http.HandlerFunc(handlers.RateLimitStatusHandler)).ServeHTTP(w, r)
+		// Apply CORS, then authentication middleware (rate limiting not needed for status check)
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				http.HandlerFunc(handlers.RateLimitStatusHandler),
+			),
+		).ServeHTTP(w, r)
 	})
 
 	// Wrap with logging middleware to log ALL requests
-	return mux
+	return middleware.CORSMiddleware(mux)
 }
 
 func main() {

@@ -13,6 +13,25 @@ import (
 	"gateway/pkg/logger"
 )
 
+// handleMessageCombined handles both collection and individual message operations
+func handleMessageCombined(w http.ResponseWriter, r *http.Request) {
+	// Extract potential message ID from path
+	messageID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/messages/", APIVersion))
+
+	// If no message ID, this is a collection operation
+	if messageID == "" {
+		// Handle collection operations (POST to create)
+		if r.Method == http.MethodPost {
+			CreateMessageHandler(w, r)
+		} else {
+			sendAPIErrorResponse(w, "Method not allowed for collection", http.StatusMethodNotAllowed)
+		}
+	} else {
+		// Handle individual message operations
+		MessageByIDHandler(w, r)
+	}
+}
+
 // SetupMessageRoutes sets up all message-related API routes
 func SetupMessageRoutes(mux *http.ServeMux, apiVersion string) {
 	// Message routes
@@ -20,8 +39,7 @@ func SetupMessageRoutes(mux *http.ServeMux, apiVersion string) {
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/batch", apiVersion), BatchMessagesHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/duplicate", apiVersion), DuplicateMessagesHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/delete-from-sequence", apiVersion), DeleteFromSequenceHandler)
-	mux.HandleFunc(fmt.Sprintf("/%s/messages/", apiVersion), MessageByIDHandler)
-	mux.HandleFunc(fmt.Sprintf("/%s/messages", apiVersion), CreateMessageHandler)
+	mux.HandleFunc(fmt.Sprintf("/%s/messages/", apiVersion), handleMessageCombined)
 }
 
 // MessageOperationsHandler handles various message operations based on the path

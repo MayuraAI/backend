@@ -74,9 +74,9 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get authenticated user from context
-	user, userOk := middleware.GetSupabaseUserFromContext(ctx)
+	user, userOk := middleware.GetFirebaseUserFromContext(ctx)
 	if userOk {
-		logger.GetDailyLogger().Info("Processing request for user: %s (%s)", user.Email, user.ID.String())
+		logger.GetDailyLogger().Info("Processing request for user: %s (%s)", user.Email, user.UID)
 	}
 
 	// Get request type from context (set by rate limiter)
@@ -261,12 +261,12 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get authenticated user from context
-	user, userOk := middleware.GetSupabaseUserFromContext(r.Context())
+	user, userOk := middleware.GetFirebaseUserFromContext(r.Context())
 
 	// Get rate limit key (same logic as rate limiter)
 	var key string
 	if userOk && user != nil {
-		key = "user:" + user.ID.String()
+		key = "user:" + user.UID
 	} else {
 		// Fall back to IP address for unauthenticated users
 		key = "user:global"
@@ -334,7 +334,7 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add user info if authenticated
 	if userOk && user != nil {
-		status.UserID = user.ID.String()
+		status.UserID = user.UID
 		status.UserEmail = user.Email
 	}
 
