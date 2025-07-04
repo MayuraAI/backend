@@ -334,31 +334,15 @@ func GetMetrics() map[string]interface{} {
 	}
 }
 
-// RateLimitStatusHandler returns the current rate limiting status for the authenticated user
+// RateLimitStatusHandler returns the current rate limit status for the authenticated user
 func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	ctx := r.Context()
 
-	// Handle preflight requests
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Only allow GET requests
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Get authenticated user from context
-	user, userOk := middleware.GetFirebaseUserFromContext(r.Context())
-
-	// Get rate limit key (same logic as rate limiter)
+	// Get user from context (set by auth middleware)
+	user, userOk := middleware.GetFirebaseUserFromContext(ctx)
 	var key string
 	var isAnonymous bool
+
 	if userOk && user != nil {
 		if middleware.IsAnonymousUser(user) {
 			key = "anonymous:" + user.UID
@@ -373,12 +357,24 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		isAnonymous = true
 	}
 
-	// Get current usage from the global rate limiter
-	usage := middleware.GetGlobalRateLimiter().GetOrCreateUsage(key)
-	currentCount, resetTime, _, _ := usage.GetUsageInfo()
+	// Get current usage from Redis
+	currentCount, resetTime, _, _, err := middleware.GetUsageInfo(ctx, key)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting usage info: %v", err)
+		// Use fallback values
+		currentCount = 0
+		resetTime = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location())
+	}
 
 	// Get blocking information
-	isBlocked, blockedUntil, recentRequests := usage.GetBlockingInfo()
+	isBlocked, blockedUntil, recentRequests, err := middleware.GetBlockingInfo(ctx, key)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting blocking info: %v", err)
+		// Use fallback values
+		isBlocked = false
+		blockedUntil = time.Time{}
+		recentRequests = 0
+	}
 
 	// Get the configuration based on user type
 	var config middleware.RateLimitConfig

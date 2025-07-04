@@ -12,6 +12,7 @@ import (
 	"gateway/handlers"
 	"gateway/middleware"
 	"gateway/pkg/logger"
+	"gateway/pkg/redis"
 
 	"github.com/joho/godotenv"
 )
@@ -107,6 +108,15 @@ func main() {
 	maxProcs := runtime.GOMAXPROCS(0)
 	logger.GetDailyLogger().Info("Gateway server initializing with %d CPU cores", maxProcs)
 
+	// Initialize Redis for rate limiting
+	redisURL := getEnvWithDefault("REDIS_URL", "redis://localhost:6379")
+	if err := redis.InitRedis(redisURL); err != nil {
+		logger.GetDailyLogger().Error("Failed to initialize Redis: %v", err)
+		logger.GetDailyLogger().Info("Continuing without Redis - rate limiting will be disabled")
+	} else {
+		logger.GetDailyLogger().Info("Successfully connected to Redis at %s", redisURL)
+	}
+
 	// Get port from environment
 	port := getEnvWithDefault("PORT", "8080")
 
@@ -152,5 +162,12 @@ func main() {
 		logger.GetDailyLogger().Error("Server forced to shutdown: %v", err)
 	} else {
 		logger.GetDailyLogger().Info("Server shutdown complete")
+	}
+
+	// Cleanup Redis connection
+	if err := redis.Close(); err != nil {
+		logger.GetDailyLogger().Error("Error closing Redis connection: %v", err)
+	} else {
+		logger.GetDailyLogger().Info("Redis connection closed")
 	}
 }
