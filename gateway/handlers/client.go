@@ -152,10 +152,22 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.GetDailyLogger().Info("Client %d: Processing prompt request (%d chars)", clientID, len(prompt))
 
-	// STEP 1: Determine chat_id - check if it's in request body, if empty and no previous messages, create new chat
+	// STEP 1: Determine chat_id - create new chat if needed
 	chatID := reqBody.ChatID
-	if chatID == "" && len(reqBody.PreviousMessages) == 0 {
-		// Create a new chat only if no chat_id is provided AND no previous messages
+
+	// If no chat_id is provided, try to extract from previous messages
+	if chatID == "" && len(reqBody.PreviousMessages) > 0 {
+		// Try to extract chat_id from previous messages
+		for _, msg := range reqBody.PreviousMessages {
+			if msg.ChatID != "" {
+				chatID = msg.ChatID
+				break
+			}
+		}
+	}
+
+	// If we still don't have a chat_id, create a new chat
+	if chatID == "" {
 		dbCtx := context.Background()
 		dbClient := aws.GetDynamoDBClient(dbCtx)
 
@@ -181,17 +193,6 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 		chatID = createdChat.ID
 		logger.GetDailyLogger().Info("Client %d: Created new chat %s", clientID, chatID)
-	} else if chatID == "" && len(reqBody.PreviousMessages) > 0 {
-		// Extract chat_id from previous messages
-		if len(reqBody.PreviousMessages) > 0 {
-			chatID = reqBody.PreviousMessages[0].ChatID
-		}
-		if chatID == "" {
-			sendErrorResponse(w, flusher, "Chat ID not found in previous messages", clientID)
-			atomic.AddInt64(&totalErrors, 1)
-			return
-		}
-		logger.GetDailyLogger().Info("Client %d: Using chat ID from previous messages: %s", clientID, chatID)
 	} else {
 		logger.GetDailyLogger().Info("Client %d: Using existing chat %s", clientID, chatID)
 	}

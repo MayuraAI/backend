@@ -46,22 +46,29 @@ func CreateChat(ctx context.Context, client *dynamodb.Client, chat Chat) (*Chat,
 
 // GetChat retrieves a chat by ID
 func GetChat(ctx context.Context, client *dynamodb.Client, id string) (*Chat, error) {
-	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
+	// Step 1: Query to get the item with the given id
+	result, err := client.Query(ctx, &dynamodb.QueryInput{
 		TableName: aws.String(ChatsTableName),
-		Key: map[string]types.AttributeValue{
-			"id": &types.AttributeValueMemberS{Value: id},
+		KeyConditions: map[string]types.Condition{
+			"id": {
+				ComparisonOperator: types.ComparisonOperatorEq,
+				AttributeValueList: []types.AttributeValue{
+					&types.AttributeValueMemberS{Value: id},
+				},
+			},
 		},
+		Limit: aws.Int32(1), // Optional: if you're sure there's only 1 item per id
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chat: %w", err)
+		return nil, fmt.Errorf("query failed: %w", err)
 	}
 
-	if result.Item == nil {
+	if len(result.Items) == 0 {
 		return nil, fmt.Errorf("chat not found")
 	}
 
 	var chat Chat
-	err = attributevalue.UnmarshalMap(result.Item, &chat)
+	err = attributevalue.UnmarshalMap(result.Items[0], &chat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal chat: %w", err)
 	}
@@ -124,20 +131,79 @@ func GetPublicChats(ctx context.Context, client *dynamodb.Client) ([]Chat, error
 
 // UpdateChat updates an existing chat
 func UpdateChat(ctx context.Context, client *dynamodb.Client, chat Chat) (*Chat, error) {
-	chat.UpdatedAt = time.Now()
-
-	av, err := attributevalue.MarshalMap(chat)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal chat: %w", err)
-	}
-
-	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName:           aws.String(ChatsTableName),
-		Item:                av,
-		ConditionExpression: aws.String("attribute_exists(id)"),
+	// Step 1: Query to get `created_at` for the given `id`
+	result, err := client.Query(ctx, &dynamodb.QueryInput{
+		TableName: aws.String(ChatsTableName),
+		KeyConditions: map[string]types.Condition{
+			"id": {
+				ComparisonOperator: types.ComparisonOperatorEq,
+				AttributeValueList: []types.AttributeValue{
+					&types.AttributeValueMemberS{Value: chat.ID},
+				},
+			},
+		},
+		Limit: aws.Int32(1), // Optional: if you're sure there's only 1 item per id
 	})
 	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+
+	if len(result.Items) == 0 {
+		return nil, fmt.Errorf("no item found with id: %s", chat.ID)
+	}
+
+	// Extract created_at from the result
+	createdAt := result.Items[0]["created_at"].(*types.AttributeValueMemberS).Value
+
+	// Step 2: Update the chat with both id and created_at
+	chat.UpdatedAt = time.Now()
+
+	// Build update expression and attribute values dynamically
+	updateExpression := "SET updated_at = :updated_at"
+	expressionAttributeValues := map[string]types.AttributeValue{
+		":updated_at": &types.AttributeValueMemberS{Value: chat.UpdatedAt.Format(time.RFC3339)},
+	}
+	expressionAttributeNames := map[string]string{}
+
+	// Add other fields to update if they are not empty
+	if chat.Name != "" {
+		updateExpression += ", #name = :name"
+		expressionAttributeValues[":name"] = &types.AttributeValueMemberS{Value: chat.Name}
+		expressionAttributeNames["#name"] = "name"
+	}
+	if chat.UserID != "" {
+		updateExpression += ", user_id = :user_id"
+		expressionAttributeValues[":user_id"] = &types.AttributeValueMemberS{Value: chat.UserID}
+	}
+	if chat.Sharing != "" {
+		updateExpression += ", sharing = :sharing"
+		expressionAttributeValues[":sharing"] = &types.AttributeValueMemberS{Value: chat.Sharing}
+	}
+
+	updateInput := &dynamodb.UpdateItemInput{
+		TableName: aws.String(ChatsTableName),
+		Key: map[string]types.AttributeValue{
+			"id":         &types.AttributeValueMemberS{Value: chat.ID},
+			"created_at": &types.AttributeValueMemberS{Value: createdAt},
+		},
+		UpdateExpression:          aws.String(updateExpression),
+		ExpressionAttributeValues: expressionAttributeValues,
+		ConditionExpression:       aws.String("attribute_exists(id)"),
+	}
+
+	// Only add ExpressionAttributeNames if we have any
+	if len(expressionAttributeNames) > 0 {
+		updateInput.ExpressionAttributeNames = expressionAttributeNames
+	}
+
+	_, err = client.UpdateItem(ctx, updateInput)
+	if err != nil {
 		return nil, fmt.Errorf("failed to update chat: %w", err)
+	}
+
+	// Set the original created_at value for the returned chat
+	if parsedTime, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+		chat.CreatedAt = parsedTime
 	}
 
 	return &chat, nil
@@ -145,25 +211,76 @@ func UpdateChat(ctx context.Context, client *dynamodb.Client, chat Chat) (*Chat,
 
 // DeleteChat deletes a chat by ID
 func DeleteChat(ctx context.Context, client *dynamodb.Client, id string) error {
-	_, err := client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+	// Step 1: Query to get `created_at` for the given `id`
+	result, err := client.Query(ctx, &dynamodb.QueryInput{
+		TableName: aws.String(ChatsTableName),
+		KeyConditions: map[string]types.Condition{
+			"id": {
+				ComparisonOperator: types.ComparisonOperatorEq,
+				AttributeValueList: []types.AttributeValue{
+					&types.AttributeValueMemberS{Value: id},
+				},
+			},
+		},
+		Limit: aws.Int32(1), // Optional: if you're sure there's only 1 item per id
+	})
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	if len(result.Items) == 0 {
+		return fmt.Errorf("no item found with id: %s", id)
+	}
+
+	// Extract created_at from the result
+	createdAt := result.Items[0]["created_at"].(*types.AttributeValueMemberS).Value
+
+	// Step 2: Delete with both id and created_at
+	_, err = client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(ChatsTableName),
 		Key: map[string]types.AttributeValue{
-			"id": &types.AttributeValueMemberS{Value: id},
+			"id":         &types.AttributeValueMemberS{Value: id},
+			"created_at": &types.AttributeValueMemberS{Value: createdAt},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to delete chat: %w", err)
+		return fmt.Errorf("delete failed: %w", err)
 	}
-
 	return nil
 }
 
 // UpdateChatSharing updates the sharing setting of a chat
 func UpdateChatSharing(ctx context.Context, client *dynamodb.Client, chatID string, sharing string) error {
-	_, err := client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+	// Step 1: Query to get `created_at` for the given `id`
+	result, err := client.Query(ctx, &dynamodb.QueryInput{
+		TableName: aws.String(ChatsTableName),
+		KeyConditions: map[string]types.Condition{
+			"id": {
+				ComparisonOperator: types.ComparisonOperatorEq,
+				AttributeValueList: []types.AttributeValue{
+					&types.AttributeValueMemberS{Value: chatID},
+				},
+			},
+		},
+		Limit: aws.Int32(1), // Optional: if you're sure there's only 1 item per id
+	})
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	if len(result.Items) == 0 {
+		return fmt.Errorf("no item found with id: %s", chatID)
+	}
+
+	// Extract created_at from the result
+	createdAt := result.Items[0]["created_at"].(*types.AttributeValueMemberS).Value
+
+	// Step 2: Update with both id and created_at
+	_, err = client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(ChatsTableName),
 		Key: map[string]types.AttributeValue{
-			"id": &types.AttributeValueMemberS{Value: chatID},
+			"id":         &types.AttributeValueMemberS{Value: chatID},
+			"created_at": &types.AttributeValueMemberS{Value: createdAt},
 		},
 		UpdateExpression: aws.String("SET sharing = :sharing, updated_at = :updated_at"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{

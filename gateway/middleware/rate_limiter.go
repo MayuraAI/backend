@@ -65,7 +65,7 @@ var defaultConfig = RateLimitConfig{
 
 // Anonymous user rate limiting configuration
 var anonymousConfig = RateLimitConfig{
-	RequestsPerDay:    5,              // 5 requests per day for anonymous users
+	RequestsPerDay:    2,              // 5 requests per day for anonymous users
 	RequestsPerMinute: 2,              // 2 requests per minute for anonymous users
 	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
 	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
@@ -133,7 +133,7 @@ func NewDailyUsage() *DailyUsage {
 }
 
 // CheckAndIncrementUsage checks if a request should be considered pro or free and increments usage
-func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitConfig) (RequestType, bool) {
+func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitConfig, isAnonymous bool) (RequestType, bool) {
 	du.mutex.Lock()
 	defer du.mutex.Unlock()
 
@@ -173,6 +173,11 @@ func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitCon
 		return FreeRequest, false // Request is rate limited by per-minute limit
 	}
 
+	// For anonymous users, block entirely if they've exceeded their daily limit
+	if isAnonymous && du.RequestCount >= dailyLimit {
+		return FreeRequest, false // Block anonymous users after quota exhaustion
+	}
+
 	// Add current request timestamp
 	du.RequestTimestamps = append(du.RequestTimestamps, now)
 
@@ -201,6 +206,7 @@ func (du *DailyUsage) CheckAndIncrementUsage(dailyLimit int, config RateLimitCon
 	if du.RequestCount <= dailyLimit {
 		return ProRequest, true
 	}
+	// For authenticated users, allow free requests after quota exhaustion
 	return FreeRequest, true
 }
 
@@ -366,23 +372,28 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 		// Create rate limit key based on user ID (from auth) or IP address
 		key := getRateLimitKey(r)
 
+		// Get user from context to determine if anonymous
+		user, userOk := GetFirebaseUserFromContext(r.Context())
+		var isAnonymous bool
+		if userOk && user != nil {
+			isAnonymous = IsAnonymousUser(user)
+		} else {
+			isAnonymous = true // Default to anonymous if no user found
+		}
+
 		// Determine which config to use based on user type
 		var cfg RateLimitConfig
-		if user, ok := GetFirebaseUserFromContext(r.Context()); ok && user != nil {
-			if IsAnonymousUser(user) {
-				cfg = anonymousConfig
-			} else {
-				cfg = defaultConfig
-			}
+		if isAnonymous {
+			cfg = anonymousConfig
 		} else {
-			cfg = anonymousConfig // Default to anonymous config if no user found
+			cfg = defaultConfig
 		}
 
 		// Get or create usage tracker for this key
 		usage := globalRateLimiter.GetOrCreateUsage(key)
 
 		// Check and increment usage, get request type
-		requestType, allowed := usage.CheckAndIncrementUsage(cfg.RequestsPerDay, cfg)
+		requestType, allowed := usage.CheckAndIncrementUsage(cfg.RequestsPerDay, cfg, isAnonymous)
 
 		// If request is blocked, return 429
 		if !allowed {
@@ -401,6 +412,11 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 				blockReason = "per-minute-limit"
 				errorMessage = fmt.Sprintf("Too many requests - maximum %d requests per minute allowed", cfg.RequestsPerMinute)
 				retryAfter = int(time.Until(minuteReset).Seconds())
+			} else if isAnonymous {
+				// For anonymous users who've exceeded daily quota
+				blockReason = "daily-quota-exceeded"
+				errorMessage = "You've used all your free requests for today. Sign up to get more!"
+				retryAfter = int(time.Until(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location())).Seconds())
 			} else {
 				// Must be suspicious activity
 				blockReason = "suspicious-activity"
@@ -424,6 +440,8 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 
 			if blockReason == "per-minute-limit" {
 				response["reset_time"] = minuteReset.Format(time.RFC3339)
+			} else if blockReason == "daily-quota-exceeded" {
+				response["reset_time"] = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location()).Format(time.RFC3339)
 			} else {
 				usage.mutex.RLock()
 				response["blocked_until"] = usage.BlockedUntil.Format(time.RFC3339)
