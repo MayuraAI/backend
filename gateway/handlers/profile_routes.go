@@ -16,6 +16,8 @@ import (
 func SetupProfileRoutes(mux *http.ServeMux, apiVersion string) {
 	// Profile routes
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/user/", apiVersion), handleProfileByUserID)
+	mux.HandleFunc(fmt.Sprintf("/%s/profiles/users/", apiVersion), handleProfilesByUserID)
+	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/check/", apiVersion), handleCheckUsernameAvailabilityGET)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/check", apiVersion), handleCheckUsernameAvailability)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/username/", apiVersion), handleGetUsernameByUserID)
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles/", apiVersion), handleProfileOperations)
@@ -105,6 +107,35 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, profile, http.StatusOK)
+}
+
+// handleCheckUsernameAvailabilityGET handles GET /v1/profiles/username/check/{username}?exclude_user_id={userId}
+func handleCheckUsernameAvailabilityGET(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	username := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/username/check/", APIVersion))
+	if username == "" {
+		sendAPIErrorResponse(w, "Username is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get exclude_user_id from query parameters
+	excludeUserID := r.URL.Query().Get("exclude_user_id")
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	available, err := aws.CheckUsernameAvailable(ctx, client, username, excludeUserID)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error checking username availability: %v", err)
+		sendAPIErrorResponse(w, "Failed to check username availability", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]bool{"available": available}, http.StatusOK)
 }
 
 // handleCheckUsernameAvailability handles POST /v1/profiles/username/check
@@ -248,4 +279,32 @@ func handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, createdProfile, http.StatusCreated)
+}
+
+// handleProfilesByUserID handles GET /v1/profiles/users/{userId} - returns array of profiles
+func handleProfilesByUserID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/users/", APIVersion))
+	if userID == "" {
+		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	// For now, we'll return a single profile as an array since we don't have GetProfilesByUserID
+	// In the future, this could be expanded to return multiple profiles if needed
+	profile, err := aws.GetProfileByUserID(ctx, client, userID)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting profile by user ID: %v", err)
+		sendAPIErrorResponse(w, "Failed to get profiles", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, []*aws.Profile{profile}, http.StatusOK)
 }
