@@ -48,9 +48,9 @@ func MessageOperationsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
-	// Handle /v1/messages/chat/{chatId} - Get messages by chat ID
-	if strings.Contains(path, "/chat/") && !strings.Contains(path, "/after/") {
-		chatID := extractPathParam(path, fmt.Sprintf("/%s/messages/chat/", APIVersion))
+	// Handle /v1/messages/by-chat-id/{chatId} - Get messages by chat ID
+	if strings.Contains(path, "/by-chat-id/") && !strings.Contains(path, "/after/") {
+		chatID := extractPathParam(path, fmt.Sprintf("/%s/messages/by-chat-id/", APIVersion))
 		if chatID == "" {
 			sendAPIErrorResponse(w, "Chat ID is required", http.StatusBadRequest)
 			return
@@ -71,7 +71,7 @@ func MessageOperationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle /v1/messages/chat/{chatId}/after/{sequenceNumber} - Delete messages including and after
+	// Handle /v1/messages/by-chat-id/{chatId}/after/{sequenceNumber} - Delete messages including and after
 	if strings.Contains(path, "/after/") {
 		if r.Method != http.MethodDelete {
 			sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
