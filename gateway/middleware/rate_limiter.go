@@ -51,13 +51,27 @@ type RateLimitConfig struct {
 
 // Default rate limiting configuration
 var defaultConfig = RateLimitConfig{
-	RequestsPerDay:    10,             // 10 requests per day per user
+	RequestsPerDay:    10,             // 10 requests per day per authenticated user
 	RequestsPerMinute: 3,              // 3 requests per minute per user
 	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
 	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
 
 	// Suspicious activity defaults
 	SuspiciousThreshold: 15,               // 15 requests in 5 minutes is suspicious
+	SuspiciousWindow:    5 * time.Minute,  // 5 minute window
+	BlockDuration:       60 * time.Minute, // Block for 1 hour
+	TrackingWindow:      10 * time.Minute, // Keep timestamps for 10 minutes
+}
+
+// Anonymous user rate limiting configuration
+var anonymousConfig = RateLimitConfig{
+	RequestsPerDay:    5,              // 5 requests per day for anonymous users
+	RequestsPerMinute: 2,              // 2 requests per minute for anonymous users
+	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
+	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
+
+	// Suspicious activity defaults
+	SuspiciousThreshold: 10,               // 10 requests in 5 minutes is suspicious for anonymous
 	SuspiciousWindow:    5 * time.Minute,  // 5 minute window
 	BlockDuration:       60 * time.Minute, // Block for 1 hour
 	TrackingWindow:      10 * time.Minute, // Keep timestamps for 10 minutes
@@ -348,12 +362,21 @@ func (rl *RateLimiter) GetUsageStats() map[string]interface{} {
 
 // RateLimitMiddleware creates a rate limiting middleware
 func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler {
-	// Use provided config or default
-	cfg := config
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create rate limit key based on user ID (from auth) or IP address
 		key := getRateLimitKey(r)
+
+		// Determine which config to use based on user type
+		var cfg RateLimitConfig
+		if user, ok := GetFirebaseUserFromContext(r.Context()); ok && user != nil {
+			if IsAnonymousUser(user) {
+				cfg = anonymousConfig
+			} else {
+				cfg = defaultConfig
+			}
+		} else {
+			cfg = anonymousConfig // Default to anonymous config if no user found
+		}
 
 		// Get or create usage tracker for this key
 		usage := globalRateLimiter.GetOrCreateUsage(key)
@@ -471,6 +494,9 @@ func GetRequestTypeFromContext(ctx context.Context) (RequestType, bool) {
 func getRateLimitKey(r *http.Request) string {
 	// Try to get user ID from context (set by auth middleware)
 	if user, ok := GetFirebaseUserFromContext(r.Context()); ok && user != nil {
+		if IsAnonymousUser(user) {
+			return "anonymous:" + user.UID
+		}
 		return "user:" + user.UID
 	}
 	return "user:global"
@@ -489,4 +515,9 @@ func GetGlobalRateLimiter() *RateLimiter {
 // GetDefaultConfig returns the default rate limiting configuration
 func GetDefaultConfig() RateLimitConfig {
 	return defaultConfig
+}
+
+// GetAnonymousConfig returns the anonymous user rate limiting configuration
+func GetAnonymousConfig() RateLimitConfig {
+	return anonymousConfig
 }

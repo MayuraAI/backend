@@ -151,6 +151,18 @@ func FirebaseAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Check if user is anonymous and log appropriately
+		if userRecord.Email == "" {
+			log.InfoWithFields("Anonymous user authenticated", map[string]interface{}{
+				"uid": userRecord.UID,
+			})
+		} else {
+			log.InfoWithFields("Authenticated user", map[string]interface{}{
+				"uid":   userRecord.UID,
+				"email": userRecord.Email,
+			})
+		}
+
 		// Add the user and token to the request context
 		ctx := context.WithValue(r.Context(), FirebaseUserContextKey, userRecord)
 		ctx = context.WithValue(ctx, FirebaseTokenContextKey, idToken)
@@ -170,4 +182,9 @@ func GetFirebaseUserFromContext(ctx context.Context) (*auth.UserRecord, bool) {
 func GetFirebaseTokenFromContext(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(FirebaseTokenContextKey).(string)
 	return token, ok
+}
+
+// IsAnonymousUser checks if the Firebase user is anonymous
+func IsAnonymousUser(user *auth.UserRecord) bool {
+	return user.Email == ""
 }
