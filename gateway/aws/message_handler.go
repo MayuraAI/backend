@@ -170,7 +170,6 @@ func DeleteMessage(ctx context.Context, client *dynamodb.Client, id string) erro
 }
 
 // DeleteMessagesIncludingAndAfter deletes messages with sequence number >= specified number
-// This replicates the Supabase function delete_messages_including_and_after
 func DeleteMessagesIncludingAndAfter(ctx context.Context, client *dynamodb.Client, userID, chatID string, sequenceNumber int) error {
 	// First, get all messages for the chat
 	messages, err := GetMessagesByChatID(ctx, client, chatID)

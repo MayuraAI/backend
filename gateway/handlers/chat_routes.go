@@ -11,13 +11,31 @@ import (
 	"gateway/pkg/logger"
 )
 
+// handleChatCombined handles both collection and individual chat operations
+func handleChatCombined(w http.ResponseWriter, r *http.Request) {
+	// Extract potential chat ID from path
+	chatID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/chats/", APIVersion))
+
+	// If no chat ID, this is a collection operation
+	if chatID == "" {
+		// Handle collection operations (POST to create)
+		if r.Method == http.MethodPost {
+			CreateChatHandler(w, r)
+		} else {
+			sendAPIErrorResponse(w, "Method not allowed for collection", http.StatusMethodNotAllowed)
+		}
+	} else {
+		// Handle individual chat operations
+		ChatOperationsHandler(w, r)
+	}
+}
+
 // SetupChatRoutes sets up all chat-related API routes
 func SetupChatRoutes(mux *http.ServeMux, apiVersion string) {
 	// Chat routes
 	mux.HandleFunc(fmt.Sprintf("/%s/chats/user/", apiVersion), ChatsByUserIDHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/chats/batch", apiVersion), BatchChatsHandler)
-	mux.HandleFunc(fmt.Sprintf("/%s/chats/", apiVersion), ChatOperationsHandler)
-	mux.HandleFunc(fmt.Sprintf("/%s/chats", apiVersion), CreateChatHandler)
+	mux.HandleFunc(fmt.Sprintf("/%s/chats/", apiVersion), handleChatCombined)
 }
 
 // ChatsByUserIDHandler handles GET /v1/chats/user/{userId}

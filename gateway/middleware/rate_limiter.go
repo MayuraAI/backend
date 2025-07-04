@@ -470,8 +470,8 @@ func GetRequestTypeFromContext(ctx context.Context) (RequestType, bool) {
 // getRateLimitKey generates a key for rate limiting based on user ID or IP
 func getRateLimitKey(r *http.Request) string {
 	// Try to get user ID from context (set by auth middleware)
-	if user, ok := GetSupabaseUserFromContext(r.Context()); ok && user != nil {
-		return "user:" + user.ID.String()
+	if user, ok := GetFirebaseUserFromContext(r.Context()); ok && user != nil {
+		return "user:" + user.UID
 	}
 	return "user:global"
 }
