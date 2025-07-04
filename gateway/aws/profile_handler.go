@@ -68,8 +68,8 @@ func CreateProfile(ctx context.Context, client *dynamodb.Client, profile Profile
 // CheckUsernameAvailable checks if a username is available (not taken by another user)
 func CheckUsernameAvailable(ctx context.Context, client *dynamodb.Client, username string, excludeUserID string) (bool, error) {
 	result, err := client.Query(ctx, &dynamodb.QueryInput{
-		TableName: aws.String(ProfilesTableName),
-		IndexName: aws.String(ProfilesUsernameGSI),
+		TableName:              aws.String(ProfilesTableName),
+		IndexName:              aws.String(ProfilesUsernameGSI),
 		KeyConditionExpression: aws.String("username = :username"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":username": &types.AttributeValueMemberS{Value: username},
@@ -78,6 +78,8 @@ func CheckUsernameAvailable(ctx context.Context, client *dynamodb.Client, userna
 	if err != nil {
 		return false, fmt.Errorf("failed to check username availability: %w", err)
 	}
+
+	logger.GetDailyLogger().Debug("result", "result", result)
 
 	// If no results, username is available
 	if len(result.Items) == 0 {

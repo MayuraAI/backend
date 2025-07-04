@@ -16,9 +16,11 @@ type Response struct {
 }
 
 type ChatMessage struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	ModelName string `json:"model_name,omitempty"`
+	Role           string `json:"role"`
+	Content        string `json:"content"`
+	ModelName      string `json:"model_name,omitempty"`
+	ChatID         string `json:"chat_id,omitempty"`
+	SequenceNumber int    `json:"sequence_number,omitempty"`
 }
 
 type RequestBody struct {
@@ -26,6 +28,8 @@ type RequestBody struct {
 	PreviousMessages      []ChatMessage `json:"previous_messages,omitempty"`
 	ProfileContext        string        `json:"profile_context,omitempty"`
 	WorkspaceInstructions string        `json:"workspace_instructions,omitempty"`
+	ChatID                string        `json:"chat_id,omitempty"`    // Optional: if provided, use existing chat; if not, create new
+	MessageID             string        `json:"message_id,omitempty"` // Optional: for message updates
 }
 
 // GenerateResponse creates a new response with the given parameters

@@ -23,14 +23,14 @@ func SetupProfileRoutes(mux *http.ServeMux, apiVersion string) {
 	mux.HandleFunc(fmt.Sprintf("/%s/profiles", apiVersion), handleCreateProfile)
 }
 
-// handleProfileByUserID handles GET /v1/profiles/user/{userId} and GET /v1/profiles/user/{userId}/all
+// handleProfileByUserID handles GET /v1/profiles/by-user-id/{userId} and GET /v1/profiles/by-user-id/{userId}/all
 func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/user/", APIVersion))
+	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/by-user-id/", APIVersion))
 	if userID == "" {
 		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
 		return
@@ -55,7 +55,6 @@ func handleProfileByUserID(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, []*aws.Profile{profile}, http.StatusOK)
 		return
 	}
-
 
 	logger.Debug("getting profile by user ID")
 	// Single profile with auto-create logic
@@ -218,14 +217,14 @@ func handleCheckUsernameAvailability(w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, map[string]bool{"available": available}, http.StatusOK)
 }
 
-// handleGetUsernameByUserID handles GET /v1/profiles/username/{userId}
+// handleGetUsernameByUserID handles GET /v1/profiles/get-username-by-user-id/{userId}
 func handleGetUsernameByUserID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/username/", APIVersion))
+	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/profiles/get-username-by-user-id/", APIVersion))
 	if userID == "" {
 		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
 		return

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gateway/aws"
 	"gateway/middleware"
 	"gateway/models"
 	"gateway/pkg/logger"
@@ -29,6 +30,7 @@ type RequestBody struct {
 	Prompt           string               `json:"prompt,omitempty"`
 	PreviousMessages []models.ChatMessage `json:"previous_messages,omitempty"`
 	ProfileContext   string               `json:"profile_context,omitempty"`
+	ChatID           string               `json:"chat_id,omitempty"`
 	// WorkspaceInstructions string               `json:"workspace_instructions,omitempty"`
 }
 
@@ -75,9 +77,13 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get authenticated user from context
 	user, userOk := middleware.GetFirebaseUserFromContext(ctx)
-	if userOk {
-		logger.GetDailyLogger().Info("Processing request for user: %s (%s)", user.Email, user.UID)
+	if !userOk || user == nil {
+		sendErrorResponse(w, nil, "Authentication required", clientID)
+		atomic.AddInt64(&totalErrors, 1)
+		return
 	}
+
+	logger.GetDailyLogger().Info("Processing request for user: %s (%s)", user.Email, user.UID)
 
 	// Get request type from context (set by rate limiter)
 	requestType, hasRequestType := middleware.GetRequestTypeFromContext(ctx)
@@ -146,6 +152,92 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.GetDailyLogger().Info("Client %d: Processing prompt request (%d chars)", clientID, len(prompt))
 
+	// STEP 1: Determine chat_id - check if it's in request body, if empty and no previous messages, create new chat
+	chatID := reqBody.ChatID
+	if chatID == "" && len(reqBody.PreviousMessages) == 0 {
+		// Create a new chat only if no chat_id is provided AND no previous messages
+		dbCtx := context.Background()
+		dbClient := aws.GetDynamoDBClient(dbCtx)
+
+		// Generate a simple chat name from the prompt (first 50 chars)
+		chatName := strings.TrimSpace(prompt)
+		if len(chatName) > 50 {
+			chatName = chatName[:50] + "..."
+		}
+
+		newChat := aws.Chat{
+			UserID:  user.UID,
+			Name:    chatName,
+			Sharing: "private",
+		}
+
+		createdChat, err := aws.CreateChat(dbCtx, dbClient, newChat)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error creating chat for client %d: %v", clientID, err)
+			sendErrorResponse(w, flusher, "Failed to create chat", clientID)
+			atomic.AddInt64(&totalErrors, 1)
+			return
+		}
+
+		chatID = createdChat.ID
+		logger.GetDailyLogger().Info("Client %d: Created new chat %s", clientID, chatID)
+	} else if chatID == "" && len(reqBody.PreviousMessages) > 0 {
+		// Extract chat_id from previous messages
+		if len(reqBody.PreviousMessages) > 0 {
+			chatID = reqBody.PreviousMessages[0].ChatID
+		}
+		if chatID == "" {
+			sendErrorResponse(w, flusher, "Chat ID not found in previous messages", clientID)
+			atomic.AddInt64(&totalErrors, 1)
+			return
+		}
+		logger.GetDailyLogger().Info("Client %d: Using chat ID from previous messages: %s", clientID, chatID)
+	} else {
+		logger.GetDailyLogger().Info("Client %d: Using existing chat %s", clientID, chatID)
+	}
+
+	// STEP 2: Determine sequence number from previous messages (latest + 1)
+	var nextSeq int
+	if len(reqBody.PreviousMessages) > 0 {
+		// Find the highest sequence number and add 1
+		maxSeq := 0
+		for _, msg := range reqBody.PreviousMessages {
+			if msg.SequenceNumber > maxSeq {
+				maxSeq = msg.SequenceNumber
+			}
+		}
+		nextSeq = maxSeq + 1
+	} else {
+		// No previous messages, start with sequence 0
+		nextSeq = 0
+	}
+
+	logger.GetDailyLogger().Info("Client %d: Using sequence number %d", clientID, nextSeq)
+
+	// STEP 3: Save user message to database (blocking - must complete before proceeding)
+	dbCtx := context.Background()
+	dbClient := aws.GetDynamoDBClient(dbCtx)
+
+	userMessage := aws.Message{
+		ChatID:         chatID,
+		UserID:         user.UID,
+		Content:        prompt,
+		ModelName:      "user",
+		Role:           "user",
+		SequenceNumber: nextSeq,
+	}
+
+	savedUserMessage, err := aws.CreateMessage(dbCtx, dbClient, userMessage)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error saving user message for client %d: %v", clientID, err)
+		sendErrorResponse(w, flusher, "Failed to save user message", clientID)
+		atomic.AddInt64(&totalErrors, 1)
+		return
+	}
+
+	logger.GetDailyLogger().Info("Client %d: Saved user message %s", clientID, savedUserMessage.ID)
+
+	// STEP 4: Get model classification (can be parallel with other setup)
 	// Create context with timeout for the entire request
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
@@ -171,8 +263,8 @@ func ClientHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.GetDailyLogger().Info("Selected model: %s (%s)", modelResponse.PrimaryModel, modelResponse.PrimaryModelDisplayName)
 
-	// Use the new fallback streaming logic
-	err = streamWithFallback(ctx, w, flusher, modelResponse, prompt, clientID, reqBody.PreviousMessages, reqBody.ProfileContext)
+	// STEP 5: Stream response and save assistant message after completion
+	err = streamWithFallbackAndSaveAfterCompletion(ctx, w, flusher, modelResponse, prompt, clientID, reqBody.PreviousMessages, reqBody.ProfileContext, user.UID, chatID, nextSeq+1)
 	if err != nil {
 		logger.GetDailyLogger().Error("Streaming error for client %d: %v", clientID, err)
 		sendErrorResponse(w, flusher, "Models not available currently. Please try again later.", clientID)
@@ -473,4 +565,167 @@ func streamWithFallback(ctx context.Context, w http.ResponseWriter, flusher http
 		return lastError
 	}
 	return fmt.Errorf("all models failed to respond")
+}
+
+// streamWithFallbackAndSaveAfterCompletion handles streaming with fallback logic and saves assistant message AFTER streaming completes
+func streamWithFallbackAndSaveAfterCompletion(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, modelResponse services.ModelResponse, prompt string, clientID int, previousMessages []models.ChatMessage, profileContext string, userID string, chatID string, assistantSeq int) error {
+	modelsToTry := []struct {
+		modelName       string
+		provider        string
+		displayName     string
+		isThinkingModel bool
+	}{}
+
+	// Extract model information from response metadata
+	if len(modelResponse.Metadata.ModelScores) == 0 {
+		modelsToTry = append(modelsToTry, struct {
+			modelName       string
+			provider        string
+			displayName     string
+			isThinkingModel bool
+		}{
+			modelName:       modelResponse.DefaultModel,
+			provider:        "default", // Fallback provider
+			displayName:     modelResponse.DefaultModelDisplayName,
+			isThinkingModel: false, // Default to false for fallback
+		})
+	} else {
+		if primaryScore, exists := modelResponse.Metadata.ModelScores[modelResponse.PrimaryModel]; exists {
+			modelsToTry = append(modelsToTry, struct {
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
+			}{
+				modelName:       primaryScore.ProviderModelName,
+				provider:        primaryScore.Provider,
+				displayName:     primaryScore.DisplayName,
+				isThinkingModel: primaryScore.IsThinkingModel,
+			})
+		}
+
+		if secondaryScore, exists := modelResponse.Metadata.ModelScores[modelResponse.SecondaryModel]; exists {
+			modelsToTry = append(modelsToTry, struct {
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
+			}{
+				modelName:       secondaryScore.ProviderModelName,
+				provider:        secondaryScore.Provider,
+				displayName:     secondaryScore.DisplayName,
+				isThinkingModel: secondaryScore.IsThinkingModel,
+			})
+		}
+
+		// Add default model as fallback
+		if defaultScore, exists := modelResponse.Metadata.ModelScores[modelResponse.DefaultModel]; exists {
+			modelsToTry = append(modelsToTry, struct {
+				modelName       string
+				provider        string
+				displayName     string
+				isThinkingModel bool
+			}{
+				modelName:       defaultScore.ProviderModelName,
+				provider:        defaultScore.Provider,
+				displayName:     defaultScore.DisplayName,
+				isThinkingModel: defaultScore.IsThinkingModel,
+			})
+		}
+	}
+
+	// Try models in order
+	var lastError error
+	var errors []string
+	var assistantResponse strings.Builder
+
+	for i, model := range modelsToTry {
+		logger.GetDailyLogger().Info("Trying model %d/%d: %s (%s) for client %d", i+1, len(modelsToTry), model.displayName, model.provider, clientID)
+
+		// Create a custom response writer to capture the assistant's response
+		responseCapture := &responseWriterWithCapture{
+			ResponseWriter: w,
+			response:       &assistantResponse,
+		}
+
+		// Try to stream with this model
+		err := streamModelResponse(ctx, responseCapture, flusher, model.modelName, model.displayName, model.provider, prompt, clientID, previousMessages, profileContext, model.isThinkingModel)
+
+		if err == nil {
+			// Success! Now save the assistant's response to database AFTER streaming is complete
+			if assistantResponse.Len() > 0 {
+				dbCtx := context.Background()
+				dbClient := aws.GetDynamoDBClient(dbCtx)
+
+				assistantMessage := aws.Message{
+					ChatID:         chatID,
+					UserID:         userID,
+					Content:        assistantResponse.String(),
+					ModelName:      model.displayName,
+					Role:           "assistant",
+					SequenceNumber: assistantSeq,
+				}
+
+				savedAssistantMessage, err := aws.CreateMessage(dbCtx, dbClient, assistantMessage)
+				if err != nil {
+					logger.GetDailyLogger().Error("Error saving assistant message for client %d: %v", clientID, err)
+					// Don't fail the request if we can't save the message, just log it
+				} else {
+					logger.GetDailyLogger().Info("Client %d: Saved assistant message %s after streaming completion", clientID, savedAssistantMessage.ID)
+				}
+			}
+
+			logger.GetDailyLogger().Info("Successfully streamed with model %s for client %d", model.displayName, clientID)
+			return nil
+		}
+
+		// Store the error for potential return
+		lastError = err
+		errors = append(errors, fmt.Sprintf("%s: %v", model.displayName, err))
+
+		// Log the error and continue to next model
+		logger.GetDailyLogger().Error("Model %s failed for client %d: %v", model.displayName, clientID, err)
+
+		// Reset the response builder for the next attempt
+		assistantResponse.Reset()
+	}
+
+	// All models failed - log detailed error information
+	logger.GetDailyLogger().Error("All %d models failed for client %d. Errors: %v", len(modelsToTry), clientID, errors)
+
+	// Return the last error
+	if lastError != nil {
+		return lastError
+	}
+	return fmt.Errorf("all models failed to respond")
+}
+
+// responseWriterWithCapture wraps http.ResponseWriter to capture the response content while preserving streaming
+type responseWriterWithCapture struct {
+	http.ResponseWriter
+	response *strings.Builder
+}
+
+func (rw *responseWriterWithCapture) Write(b []byte) (int, error) {
+	// Parse SSE data to extract message content
+	data := string(b)
+	if strings.HasPrefix(data, "data: ") {
+		jsonData := strings.TrimPrefix(data, "data: ")
+		jsonData = strings.TrimSuffix(jsonData, "\n\n")
+
+		// Try to parse the JSON to extract message content
+		var response struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		}
+
+		if err := json.Unmarshal([]byte(jsonData), &response); err == nil {
+			if response.Type == "chunk" && response.Message != "" {
+				rw.response.WriteString(response.Message)
+			}
+		}
+	}
+
+	// Always write to the original response writer to maintain streaming
+	return rw.ResponseWriter.Write(b)
 }

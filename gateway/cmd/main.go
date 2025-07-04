@@ -60,7 +60,7 @@ func setupRoutes() http.Handler {
 	// })
 
 	// Protected route with rate limiting and Firebase auth middleware - only allow POST requests
-	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -77,7 +77,7 @@ func setupRoutes() http.Handler {
 	})
 
 	// Rate limit status endpoint - requires authentication
-	mux.HandleFunc("/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return

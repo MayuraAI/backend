@@ -38,14 +38,14 @@ func SetupChatRoutes(mux *http.ServeMux, apiVersion string) {
 	mux.HandleFunc(fmt.Sprintf("/%s/chats/", apiVersion), handleChatCombined)
 }
 
-// ChatsByUserIDHandler handles GET /v1/chats/user/{userId}
+// ChatsByUserIDHandler handles GET /v1/chats/by-user-id/{userId}
 func ChatsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/chats/user/", APIVersion))
+	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/chats/by-user-id/", APIVersion))
 	if userID == "" {
 		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
 		return
