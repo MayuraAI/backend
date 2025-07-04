@@ -357,11 +357,19 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get rate limit key (same logic as rate limiter)
 	var key string
+	var isAnonymous bool
 	if userOk && user != nil {
-		key = "user:" + user.UID
+		if middleware.IsAnonymousUser(user) {
+			key = "anonymous:" + user.UID
+			isAnonymous = true
+		} else {
+			key = "user:" + user.UID
+			isAnonymous = false
+		}
 	} else {
 		// Fall back to IP address for unauthenticated users
 		key = "user:global"
+		isAnonymous = true
 	}
 
 	// Get current usage from the global rate limiter
@@ -371,8 +379,13 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	// Get blocking information
 	isBlocked, blockedUntil, recentRequests := usage.GetBlockingInfo()
 
-	// Get the configuration
-	config := middleware.GetDefaultConfig()
+	// Get the configuration based on user type
+	var config middleware.RateLimitConfig
+	if isAnonymous {
+		config = middleware.GetAnonymousConfig()
+	} else {
+		config = middleware.GetDefaultConfig()
+	}
 	dailyLimit := config.RequestsPerDay
 
 	// Calculate remaining requests
@@ -390,14 +403,26 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		message = fmt.Sprintf("Your account is temporarily blocked due to suspicious activity until %s", blockedUntil.Format("15:04:05"))
 	} else if currentCount < dailyLimit {
 		currentMode = middleware.ProRequest
-		if remaining == 1 {
-			message = "You have 1 pro request remaining today"
+		if isAnonymous {
+			if remaining == 1 {
+				message = "You have 1 free request remaining today. Sign up to get 10 pro requests daily!"
+			} else {
+				message = fmt.Sprintf("You have %d free requests remaining today. Sign up to get 10 pro requests daily!", remaining)
+			}
 		} else {
-			message = fmt.Sprintf("You have %d pro requests remaining today", remaining)
+			if remaining == 1 {
+				message = "You have 1 pro request remaining today"
+			} else {
+				message = fmt.Sprintf("You have %d pro requests remaining today", remaining)
+			}
 		}
 	} else {
 		currentMode = middleware.FreeRequest
-		message = "You've used all your pro requests for today."
+		if isAnonymous {
+			message = "You've used all your free requests for today. Sign up to get 10 pro requests daily!"
+		} else {
+			message = "You've used all your pro requests for today."
+		}
 	}
 
 	// Create response
