@@ -19,6 +19,7 @@ func SetupMessageRoutes(mux *http.ServeMux, apiVersion string) {
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/chat/", apiVersion), MessageOperationsHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/batch", apiVersion), BatchMessagesHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/duplicate", apiVersion), DuplicateMessagesHandler)
+	mux.HandleFunc(fmt.Sprintf("/%s/messages/delete-from-sequence", apiVersion), DeleteFromSequenceHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages/", apiVersion), MessageByIDHandler)
 	mux.HandleFunc(fmt.Sprintf("/%s/messages", apiVersion), CreateMessageHandler)
 }
@@ -270,4 +271,40 @@ func CreateMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, createdMessage, http.StatusCreated)
+}
+
+// DeleteFromSequenceHandler handles POST /v1/messages/delete-from-sequence
+func DeleteFromSequenceHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID         string `json:"user_id"`
+		ChatID         string `json:"chat_id"`
+		SequenceNumber int    `json:"sequence_number"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.ChatID == "" {
+		sendAPIErrorResponse(w, "User ID and Chat ID are required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	err := aws.DeleteMessagesIncludingAndAfter(ctx, client, req.UserID, req.ChatID, req.SequenceNumber)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error deleting messages from sequence: %v", err)
+		sendAPIErrorResponse(w, "Failed to delete messages", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]bool{"success": true}, http.StatusOK)
 }
