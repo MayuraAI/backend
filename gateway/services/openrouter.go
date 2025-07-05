@@ -115,15 +115,15 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 	// Format messages for OpenRouter
 	messages := []OpenRouterMessage{}
 
-	// Add system prompt as a proper system message
+	// --- REFINED PROMPT AND HISTORY HANDLING ---
+
+	// 1. Get the base system prompt
 	finalSystemPrompt := systemPrompt
 	if profileContext != "" {
-		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
+		finalSystemPrompt += "\n\n--- User Profile Context (Follow these instructions implicitly) ---\n" + profileContext
 	}
 
-	// Add clear instructions about handling context vs current prompt
-	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question, else don't use it or even talk about it"
-
+	// 2. Add system prompt as a proper system message
 	if finalSystemPrompt != "" {
 		messages = append(messages, OpenRouterMessage{
 			Role:    "system",
@@ -131,8 +131,8 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 		})
 	}
 
-	// Add previous messages as context (up to the last 4)
-	// Filter out thinking blocks
+	// 3. Build the conversational history with proper roles
+	// Filter out thinking blocks from previous messages
 	filteredMessages := []models.ChatMessage{}
 	for _, msg := range previousMessages {
 		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
@@ -140,50 +140,25 @@ func StreamOpenRouterResponse(ctx context.Context, w http.ResponseWriter, flushe
 		}
 	}
 
-	if len(filteredMessages) > 0 {
-		startIdx := 0
-		if len(filteredMessages) > 4 {
-			startIdx = len(filteredMessages) - 4
-		}
-
-		for _, msg := range filteredMessages[startIdx:] {
-			// Add context prefix to make it clear this is previous conversation
-			contextPrefix := ""
-			if msg.Role == "user" {
-				contextPrefix = "[PREVIOUS CONTEXT] User: "
-			} else {
-				contextPrefix = "[PREVIOUS CONTEXT] Assistant: "
-			}
-
-			messages = append(messages, OpenRouterMessage{
-				Role:    msg.Role,
-				Content: contextPrefix + msg.Content,
-			})
-		}
+	// Process up to the last 4 messages for context
+	startIdx := 0
+	if len(filteredMessages) > 4 {
+		startIdx = len(filteredMessages) - 4
 	}
 
-	// Check if the current prompt is already included in the previous messages
-	addCurrentPrompt := true
-	if len(previousMessages) > 0 {
-		lastMsg := previousMessages[len(previousMessages)-1]
-		if lastMsg.Role == "user" && lastMsg.Content == prompt {
-			addCurrentPrompt = false
-		}
-	}
-
-	// Add the current prompt as a user message if needed
-	if addCurrentPrompt {
-		// Add clear marking for current request
-		currentPromptText := prompt
-		if len(filteredMessages) > 0 {
-			currentPromptText = "[CURRENT REQUEST] " + prompt
-		}
-
+	for _, msg := range filteredMessages[startIdx:] {
+		// Use clean message content without prefixes
 		messages = append(messages, OpenRouterMessage{
-			Role:    "user",
-			Content: currentPromptText,
+			Role:    msg.Role,    // Keep original role (user/assistant)
+			Content: msg.Content, // Use the clean, original content
 		})
 	}
+
+	// 4. Add the current user prompt as the final message
+	messages = append(messages, OpenRouterMessage{
+		Role:    "user",
+		Content: prompt, // The current prompt is the last thing the user said
+	})
 
 	// Create the request body
 	reqBody := OpenRouterRequest{
