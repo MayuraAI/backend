@@ -128,333 +128,637 @@ func getGeminiConfig() (apiKey, modelName, baseURL string) {
 	return apiKey, modelName, baseURL
 }
 
+// // StreamGeminiResponse calls Gemini API and streams the response with optimizations
+// func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
+// 	// Initialize optimized client
+// 	initGeminiClient()
+
+// 	startTime := time.Now()
+
+// 	// Get API key and model name from environment
+// 	apiKey, modelName, baseURL := getGeminiConfig()
+
+// 	// Use provided model or fall back to default
+// 	if model != "" {
+// 		modelName = model
+// 	}
+
+// 	// Get the system prompt
+// 	systemPrompt := models.Config.GetSystemPrompt("gemini")
+
+// 	// Format messages for Gemini
+// 	contents := []GeminiContent{}
+
+// 	// Prepare system instruction
+// 	var systemInstruction *GeminiSystemInstruction
+// 	finalSystemPrompt := systemPrompt
+// 	if profileContext != "" {
+// 		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
+// 	}
+
+// 	// Add clear instructions about handling context vs current prompt
+// 	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question, else don't use it or even talk about it"
+
+// 	if finalSystemPrompt != "" {
+// 		systemInstruction = &GeminiSystemInstruction{
+// 			Parts: []struct {
+// 				Text string `json:"text"`
+// 			}{
+// 				{Text: finalSystemPrompt},
+// 			},
+// 		}
+// 	}
+
+// 	// Add previous messages as context (up to the last 4)
+// 	// Filter out thinking blocks
+// 	filteredMessages := []models.ChatMessage{}
+// 	for _, msg := range previousMessages {
+// 		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+// 			filteredMessages = append(filteredMessages, msg)
+// 		}
+// 	}
+
+// 	if len(filteredMessages) > 0 {
+// 		// Limit to last 4 messages
+// 		startIdx := 0
+// 		if len(filteredMessages) > 4 {
+// 			startIdx = len(filteredMessages) - 4
+// 		}
+
+// 		for _, msg := range filteredMessages[startIdx:] {
+// 			role := "user"
+// 			if msg.Role != "user" {
+// 				role = "model"
+// 			}
+
+// 			// Add context prefix to make it clear this is previous conversation
+// 			contextPrefix := ""
+// 			if msg.Role == "user" {
+// 				contextPrefix = "[PREVIOUS CONTEXT] User: "
+// 			} else {
+// 				contextPrefix = "[PREVIOUS CONTEXT] Assistant: "
+// 			}
+
+// 			contents = append(contents, GeminiContent{
+// 				Role: role,
+// 				Parts: []struct {
+// 					Text string `json:"text"`
+// 				}{
+// 					{Text: contextPrefix + msg.Content},
+// 				},
+// 			})
+// 		}
+// 	}
+
+// 	// Check if the current prompt is already included in the previous messages
+// 	addCurrentPrompt := true
+// 	if len(previousMessages) > 0 {
+// 		lastMsg := previousMessages[len(previousMessages)-1]
+// 		if lastMsg.Role == "user" && lastMsg.Content == prompt {
+// 			addCurrentPrompt = false
+// 		}
+// 	}
+
+// 	// Add the current prompt as a user message if needed
+// 	if addCurrentPrompt {
+// 		// Add clear marking for current request
+// 		currentPromptText := prompt
+// 		if len(filteredMessages) > 0 {
+// 			currentPromptText = "[CURRENT REQUEST] " + prompt
+// 		}
+
+// 		contents = append(contents, GeminiContent{
+// 			Role: "user",
+// 			Parts: []struct {
+// 				Text string `json:"text"`
+// 			}{
+// 				{Text: currentPromptText},
+// 			},
+// 		})
+// 	}
+
+// 	// Create the request body with conditional ThinkingConfig
+// 	generationConfig := struct {
+// 		Temperature     float64 `json:"temperature,omitempty"`
+// 		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+// 		TopP            float64 `json:"topP,omitempty"`
+// 		TopK            int     `json:"topK,omitempty"`
+// 		ThinkingConfig  *struct {
+// 			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+// 			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+// 		} `json:"thinkingConfig,omitempty"`
+// 	}{
+// 		Temperature: 0.7,
+// 		// MaxOutputTokens: 2048,
+// 		TopP: 0.95,
+// 		TopK: 40,
+// 	}
+
+// 	// Only add ThinkingConfig if this is a thinking model
+// 	if isThinkingModel {
+// 		generationConfig.ThinkingConfig = &struct {
+// 			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+// 			IncludeThoughts bool `json:"includeThoughts,omitempty"`
+// 		}{
+// 			ThinkingBudget:  1024,
+// 			IncludeThoughts: true,
+// 		}
+// 	}
+
+// 	reqBody := GeminiRequest{
+// 		Contents:          contents,
+// 		SystemInstruction: systemInstruction,
+// 		GenerationConfig:  generationConfig,
+// 	}
+
+// 	jsonData, err := json.Marshal(reqBody)
+// 	if err != nil {
+// 		return fmt.Errorf("error marshaling request: %v", err)
+// 	}
+
+// 	// Create streaming URL
+// 	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse&key=%s", baseURL, modelName, apiKey)
+
+// 	// Create request with context for cancellation
+// 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+// 	if err != nil {
+// 		return fmt.Errorf("error creating request: %v", err)
+// 	}
+
+// 	// Optimize headers for streaming
+// 	req.Header.Set("Content-Type", "application/json")
+// 	req.Header.Set("Accept", "text/event-stream")
+// 	req.Header.Set("Connection", "keep-alive")
+// 	req.Header.Set("Cache-Control", "no-cache")
+
+// 	// Make the request
+// 	resp, err := geminiClient.Do(req)
+// 	if err != nil {
+// 		return fmt.Errorf("error calling Gemini API: %v", err)
+// 	}
+// 	defer resp.Body.Close()
+
+// 	if resp.StatusCode != http.StatusOK {
+// 		respBody, _ := io.ReadAll(resp.Body)
+// 		return fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(respBody))
+// 	}
+
+// 	// API request succeeded - now send start chunk with model display name
+// 	startResponse := models.Response{
+// 		Message: displayName,
+// 		Type:    "start",
+// 		Model:   displayName,
+// 	}
+
+// 	startMsg, err := models.FormatSSEMessage(startResponse)
+// 	if err == nil {
+// 		fmt.Fprint(w, startMsg)
+// 		flusher.Flush()
+// 	}
+
+// 	// Stream processing with optimized buffering
+// 	scanner := bufio.NewScanner(resp.Body)
+
+// 	// Increase buffer size for better performance
+// 	buf := make([]byte, 64*1024) // 64KB buffer
+// 	scanner.Buffer(buf, 64*1024)
+
+// 	chunkCount := 0
+// 	var fullResponse strings.Builder
+// 	var inThinking bool = false
+
+// 	for scanner.Scan() {
+// 		line := scanner.Text()
+// 		if len(line) == 0 {
+// 			continue
+// 		}
+
+// 		// Parse SSE format - strip "data: " prefix
+// 		if strings.HasPrefix(line, "data: ") {
+// 			line = strings.TrimPrefix(line, "data: ")
+// 		} else {
+// 			// Skip non-data lines
+// 			continue
+// 		}
+
+// 		// Parse JSON response
+// 		var streamResp map[string]interface{}
+// 		if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+// 			// Log error but continue processing
+// 			continue
+// 		}
+
+// 		chunkCount++
+
+// 		// Extract the response part
+// 		var chunkText string
+// 		var isThought bool = false
+// 		isFinal := false
+
+// 		// Navigate through the JSON structure to find the text
+// 		if candidates, ok := streamResp["candidates"].([]interface{}); ok && len(candidates) > 0 {
+// 			if candidate, ok := candidates[0].(map[string]interface{}); ok {
+// 				if content, ok := candidate["content"].(map[string]interface{}); ok {
+// 					if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
+// 						if part, ok := parts[0].(map[string]interface{}); ok {
+// 							if text, ok := part["text"].(string); ok {
+// 								chunkText = text
+// 								if !isThought {
+// 									fullResponse.WriteString(text)
+// 								}
+// 							}
+// 							// Check if this is a thought
+// 							if thought, ok := part["thought"].(bool); ok && thought {
+// 								isThought = true
+// 							}
+// 						}
+// 					}
+// 				}
+
+// 				// Check if this is the final message with finishReason
+// 				if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
+// 					isFinal = true
+// 				}
+// 			}
+// 		}
+
+// 		// Handle thinking state transitions and send appropriate markers only for thinking models
+// 		if isThinkingModel {
+// 			if isThought && !inThinking {
+// 				// Starting to think - send thinking start marker only once
+// 				thinkStartResponse := models.Response{
+// 					Message: "◁think▷",
+// 					Type:    "chunk",
+// 				}
+// 				msg, err := models.FormatSSEMessage(thinkStartResponse)
+// 				if err == nil {
+// 					fmt.Fprint(w, msg)
+// 					flusher.Flush()
+// 				}
+// 				inThinking = true
+// 			} else if !isThought && inThinking {
+// 				// Send thinking end marker
+// 				thinkEndResponse := models.Response{
+// 					Message: "◁/think▷",
+// 					Type:    "chunk",
+// 				}
+// 				msg, err := models.FormatSSEMessage(thinkEndResponse)
+// 				if err == nil {
+// 					fmt.Fprint(w, msg)
+// 					flusher.Flush()
+// 				}
+// 				inThinking = false
+// 			}
+// 		}
+
+// 		// Handle content based on whether it's thinking or regular content
+// 		if chunkText != "" {
+// 			// Send content chunks immediately - both thinking and regular content
+// 			chunkResponse := models.Response{
+// 				Message: chunkText,
+// 				Type:    "chunk",
+// 			}
+
+// 			msg, err := models.FormatSSEMessage(chunkResponse)
+// 			if err != nil {
+// 				return fmt.Errorf("error formatting chunk: %v", err)
+// 			}
+
+// 			_, err = fmt.Fprint(w, msg)
+// 			if err != nil {
+// 				return fmt.Errorf("error sending chunk: %v", err)
+// 			}
+// 			flusher.Flush()
+// 		}
+
+// 		// Check if done
+// 		if isFinal {
+// 			break
+// 		}
+// 	}
+
+// 	if err := scanner.Err(); err != nil {
+// 		return fmt.Errorf("error reading stream: %v", err)
+// 	}
+
+// 	// Send completion signal
+// 	finalResponse := models.Response{
+// 		Type:      "end",
+// 		Timestamp: time.Now().Format(time.RFC3339),
+// 	}
+
+// 	msg, _ := models.FormatSSEMessage(finalResponse)
+// 	fmt.Fprint(w, msg)
+// 	flusher.Flush()
+
+// 	logger.GetDailyLogger().Info("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
+
+// 	return nil
+// }
+
 // StreamGeminiResponse calls Gemini API and streams the response with optimizations
 func StreamGeminiResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, prompt string, model string, displayName string, clientID int, previousMessages []models.ChatMessage, profileContext string, isThinkingModel bool) error {
-	// Initialize optimized client
-	initGeminiClient()
+    // Initialize optimized client
+    initGeminiClient()
 
-	startTime := time.Now()
+    startTime := time.Now()
 
-	// Get API key and model name from environment
-	apiKey, modelName, baseURL := getGeminiConfig()
+    // Get API key and model name from environment
+    apiKey, modelName, baseURL := getGeminiConfig()
 
-	// Use provided model or fall back to default
-	if model != "" {
-		modelName = model
-	}
+    // Use provided model or fall back to default
+    if model != "" {
+        modelName = model
+    }
 
-	// Get the system prompt
-	systemPrompt := models.Config.GetSystemPrompt("gemini")
+    // --- REFINED PROMPT AND HISTORY HANDLING ---
 
-	// Format messages for Gemini
-	contents := []GeminiContent{}
+    // 1. Get the base system prompt
+    systemPrompt := models.Config.GetSystemPrompt("gemini")
+    finalSystemPrompt := systemPrompt
+    if profileContext != "" {
+        finalSystemPrompt += "\n\n--- User Profile Context (Follow these instructions implicitly) ---\n" + profileContext
+    }
 
-	// Prepare system instruction
-	var systemInstruction *GeminiSystemInstruction
-	finalSystemPrompt := systemPrompt
-	if profileContext != "" {
-		finalSystemPrompt += "\n\nUser Profile Context and instructions:\n" + profileContext
-	}
+    // 2. Prepare the system instruction object
+    var systemInstruction *GeminiSystemInstruction
+    if finalSystemPrompt != "" {
+        systemInstruction = &GeminiSystemInstruction{
+            Parts: []struct {
+                Text string `json:"text"`
+            }{
+                {Text: finalSystemPrompt},
+            },
+        }
+    }
 
-	// Add clear instructions about handling context vs current prompt
-	finalSystemPrompt += "\n\nIMPORTANT INSTRUCTIONS:\n- When provided with conversation history, use it only as CONTEXT for understanding the user\n- Always focus on answering the CURRENT USER QUESTION/REQUEST which will be clearly marked\n- If the current question is about a different topic than the conversation history, focus on the current question\n- Use conversation history only when it's directly relevant to the current question, else don't use it or even talk about it"
+    // 3. Build the conversational history with proper roles
+    contents := []GeminiContent{}
 
-	if finalSystemPrompt != "" {
-		systemInstruction = &GeminiSystemInstruction{
-			Parts: []struct {
-				Text string `json:"text"`
-			}{
-				{Text: finalSystemPrompt},
-			},
-		}
-	}
+    // Filter out thinking blocks from previous messages
+    filteredMessages := []models.ChatMessage{}
+    for _, msg := range previousMessages {
+        if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
+            filteredMessages = append(filteredMessages, msg)
+        }
+    }
 
-	// Add previous messages as context (up to the last 4)
-	// Filter out thinking blocks
-	filteredMessages := []models.ChatMessage{}
-	for _, msg := range previousMessages {
-		if !strings.Contains(msg.Content, "◁think▷") && !strings.Contains(msg.Content, "◁/think▷") {
-			filteredMessages = append(filteredMessages, msg)
-		}
-	}
+    // Process up to the last 4 messages for context
+    startIdx := 0
+    if len(filteredMessages) > 4 {
+        startIdx = len(filteredMessages) - 4
+    }
 
-	if len(filteredMessages) > 0 {
-		// Limit to last 4 messages
-		startIdx := 0
-		if len(filteredMessages) > 4 {
-			startIdx = len(filteredMessages) - 4
-		}
+    for _, msg := range filteredMessages[startIdx:] {
+        role := "user"
+        // Assign the 'model' role for assistant's messages
+        if msg.Role != "user" {
+            role = "model"
+        }
+        contents = append(contents, GeminiContent{
+            Role: role,
+            Parts: []struct {
+                Text string `json:"text"`
+            }{
+                {Text: msg.Content}, // Use the clean, original content
+            },
+        })
+    }
 
-		for _, msg := range filteredMessages[startIdx:] {
-			role := "user"
-			if msg.Role != "user" {
-				role = "model"
-			}
+    // 4. Add the current user prompt as the final message
+    contents = append(contents, GeminiContent{
+        Role: "user",
+        Parts: []struct {
+            Text string `json:"text"`
+        }{
+            {Text: prompt}, // The current prompt is the last thing the user said
+        },
+    })
 
-			// Add context prefix to make it clear this is previous conversation
-			contextPrefix := ""
-			if msg.Role == "user" {
-				contextPrefix = "[PREVIOUS CONTEXT] User: "
-			} else {
-				contextPrefix = "[PREVIOUS CONTEXT] Assistant: "
-			}
 
-			contents = append(contents, GeminiContent{
-				Role: role,
-				Parts: []struct {
-					Text string `json:"text"`
-				}{
-					{Text: contextPrefix + msg.Content},
-				},
-			})
-		}
-	}
+    // ... (the rest of the function, including generationConfig, request creation, and streaming logic, remains the same) ...
+    // The previous complex logic for addCurrentPrompt, contextPrefix, etc., is no longer needed.
 
-	// Check if the current prompt is already included in the previous messages
-	addCurrentPrompt := true
-	if len(previousMessages) > 0 {
-		lastMsg := previousMessages[len(previousMessages)-1]
-		if lastMsg.Role == "user" && lastMsg.Content == prompt {
-			addCurrentPrompt = false
-		}
-	}
+    // Create the request body with conditional ThinkingConfig
+    generationConfig := struct {
+        Temperature     float64 `json:"temperature,omitempty"`
+        MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+        TopP            float64 `json:"topP,omitempty"`
+        TopK            int     `json:"topK,omitempty"`
+        ThinkingConfig  *struct {
+            ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+            IncludeThoughts bool `json:"includeThoughts,omitempty"`
+        } `json:"thinkingConfig,omitempty"`
+    }{
+        Temperature: 0.7,
+        // MaxOutputTokens: 2048,
+        TopP: 0.95,
+        TopK: 40,
+    }
 
-	// Add the current prompt as a user message if needed
-	if addCurrentPrompt {
-		// Add clear marking for current request
-		currentPromptText := prompt
-		if len(filteredMessages) > 0 {
-			currentPromptText = "[CURRENT REQUEST] " + prompt
-		}
+    // Only add ThinkingConfig if this is a thinking model
+    if isThinkingModel {
+        generationConfig.ThinkingConfig = &struct {
+            ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
+            IncludeThoughts bool `json:"includeThoughts,omitempty"`
+        }{
+            ThinkingBudget:  1024,
+            IncludeThoughts: true,
+        }
+    }
 
-		contents = append(contents, GeminiContent{
-			Role: "user",
-			Parts: []struct {
-				Text string `json:"text"`
-			}{
-				{Text: currentPromptText},
-			},
-		})
-	}
+    reqBody := GeminiRequest{
+        Contents:          contents,
+        SystemInstruction: systemInstruction,
+        GenerationConfig:  generationConfig,
+    }
 
-	// Create the request body with conditional ThinkingConfig
-	generationConfig := struct {
-		Temperature     float64 `json:"temperature,omitempty"`
-		MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-		TopP            float64 `json:"topP,omitempty"`
-		TopK            int     `json:"topK,omitempty"`
-		ThinkingConfig  *struct {
-			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
-			IncludeThoughts bool `json:"includeThoughts,omitempty"`
-		} `json:"thinkingConfig,omitempty"`
-	}{
-		Temperature: 0.7,
-		// MaxOutputTokens: 2048,
-		TopP: 0.95,
-		TopK: 40,
-	}
+    jsonData, err := json.Marshal(reqBody)
+    if err != nil {
+        return fmt.Errorf("error marshaling request: %v", err)
+    }
 
-	// Only add ThinkingConfig if this is a thinking model
-	if isThinkingModel {
-		generationConfig.ThinkingConfig = &struct {
-			ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
-			IncludeThoughts bool `json:"includeThoughts,omitempty"`
-		}{
-			ThinkingBudget:  1024,
-			IncludeThoughts: true,
-		}
-	}
+    // Create streaming URL
+    url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse&key=%s", baseURL, modelName, apiKey)
 
-	reqBody := GeminiRequest{
-		Contents:          contents,
-		SystemInstruction: systemInstruction,
-		GenerationConfig:  generationConfig,
-	}
+    // Create request with context for cancellation
+    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+    if err != nil {
+        return fmt.Errorf("error creating request: %v", err)
+    }
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("error marshaling request: %v", err)
-	}
+    // Optimize headers for streaming
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Accept", "text/event-stream")
+    req.Header.Set("Connection", "keep-alive")
+    req.Header.Set("Cache-Control", "no-cache")
 
-	// Create streaming URL
-	url := fmt.Sprintf("%s/%s:streamGenerateContent?alt=sse&key=%s", baseURL, modelName, apiKey)
+    // Make the request
+    resp, err := geminiClient.Do(req)
+    if err != nil {
+        return fmt.Errorf("error calling Gemini API: %v", err)
+    }
+    defer resp.Body.Close()
 
-	// Create request with context for cancellation
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("error creating request: %v", err)
-	}
+    if resp.StatusCode != http.StatusOK {
+        respBody, _ := io.ReadAll(resp.Body)
+        return fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(respBody))
+    }
 
-	// Optimize headers for streaming
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Cache-Control", "no-cache")
+    // API request succeeded - now send start chunk with model display name
+    startResponse := models.Response{
+        Message: displayName,
+        Type:    "start",
+        Model:   displayName,
+    }
 
-	// Make the request
-	resp, err := geminiClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("error calling Gemini API: %v", err)
-	}
-	defer resp.Body.Close()
+    startMsg, err := models.FormatSSEMessage(startResponse)
+    if err == nil {
+        fmt.Fprint(w, startMsg)
+        flusher.Flush()
+    }
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
+    // Stream processing with optimized buffering
+    scanner := bufio.NewScanner(resp.Body)
 
-	// API request succeeded - now send start chunk with model display name
-	startResponse := models.Response{
-		Message: displayName,
-		Type:    "start",
-		Model:   displayName,
-	}
+    // Increase buffer size for better performance
+    buf := make([]byte, 64*1024) // 64KB buffer
+    scanner.Buffer(buf, 64*1024)
 
-	startMsg, err := models.FormatSSEMessage(startResponse)
-	if err == nil {
-		fmt.Fprint(w, startMsg)
-		flusher.Flush()
-	}
+    chunkCount := 0
+    var fullResponse strings.Builder
+    var inThinking bool = false
 
-	// Stream processing with optimized buffering
-	scanner := bufio.NewScanner(resp.Body)
+    for scanner.Scan() {
+        line := scanner.Text()
+        if len(line) == 0 {
+            continue
+        }
 
-	// Increase buffer size for better performance
-	buf := make([]byte, 64*1024) // 64KB buffer
-	scanner.Buffer(buf, 64*1024)
+        // Parse SSE format - strip "data: " prefix
+        if strings.HasPrefix(line, "data: ") {
+            line = strings.TrimPrefix(line, "data: ")
+        } else {
+            // Skip non-data lines
+            continue
+        }
 
-	chunkCount := 0
-	var fullResponse strings.Builder
-	var inThinking bool = false
+        // Parse JSON response
+        var streamResp map[string]interface{}
+        if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+            // Log error but continue processing
+            continue
+        }
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) == 0 {
-			continue
-		}
+        chunkCount++
 
-		// Parse SSE format - strip "data: " prefix
-		if strings.HasPrefix(line, "data: ") {
-			line = strings.TrimPrefix(line, "data: ")
-		} else {
-			// Skip non-data lines
-			continue
-		}
+        // Extract the response part
+        var chunkText string
+        var isThought bool = false
+        isFinal := false
 
-		// Parse JSON response
-		var streamResp map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
-			// Log error but continue processing
-			continue
-		}
+        // Navigate through the JSON structure to find the text
+        if candidates, ok := streamResp["candidates"].([]interface{}); ok && len(candidates) > 0 {
+            if candidate, ok := candidates[0].(map[string]interface{}); ok {
+                if content, ok := candidate["content"].(map[string]interface{}); ok {
+                    if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
+                        if part, ok := parts[0].(map[string]interface{}); ok {
+                            if text, ok := part["text"].(string); ok {
+                                chunkText = text
+                                if !isThought {
+                                    fullResponse.WriteString(text)
+                                }
+                            }
+                            // Check if this is a thought
+                            if thought, ok := part["thought"].(bool); ok && thought {
+                                isThought = true
+                            }
+                        }
+                    }
+                }
 
-		chunkCount++
+                // Check if this is the final message with finishReason
+                if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
+                    isFinal = true
+                }
+            }
+        }
 
-		// Extract the response part
-		var chunkText string
-		var isThought bool = false
-		isFinal := false
+        // Handle thinking state transitions and send appropriate markers only for thinking models
+        if isThinkingModel {
+            if isThought && !inThinking {
+                // Starting to think - send thinking start marker only once
+                thinkStartResponse := models.Response{
+                    Message: "◁think▷",
+                    Type:    "chunk",
+                }
+                msg, err := models.FormatSSEMessage(thinkStartResponse)
+                if err == nil {
+                    fmt.Fprint(w, msg)
+                    flusher.Flush()
+                }
+                inThinking = true
+            } else if !isThought && inThinking {
+                // Send thinking end marker
+                thinkEndResponse := models.Response{
+                    Message: "◁/think▷",
+                    Type:    "chunk",
+                }
+                msg, err := models.FormatSSEMessage(thinkEndResponse)
+                if err == nil {
+                    fmt.Fprint(w, msg)
+                    flusher.Flush()
+                }
+                inThinking = false
+            }
+        }
 
-		// Navigate through the JSON structure to find the text
-		if candidates, ok := streamResp["candidates"].([]interface{}); ok && len(candidates) > 0 {
-			if candidate, ok := candidates[0].(map[string]interface{}); ok {
-				if content, ok := candidate["content"].(map[string]interface{}); ok {
-					if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
-						if part, ok := parts[0].(map[string]interface{}); ok {
-							if text, ok := part["text"].(string); ok {
-								chunkText = text
-								if !isThought {
-									fullResponse.WriteString(text)
-								}
-							}
-							// Check if this is a thought
-							if thought, ok := part["thought"].(bool); ok && thought {
-								isThought = true
-							}
-						}
-					}
-				}
+        // Handle content based on whether it's thinking or regular content
+        if chunkText != "" {
+            // Send content chunks immediately - both thinking and regular content
+            chunkResponse := models.Response{
+                Message: chunkText,
+                Type:    "chunk",
+            }
 
-				// Check if this is the final message with finishReason
-				if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
-					isFinal = true
-				}
-			}
-		}
+            msg, err := models.FormatSSEMessage(chunkResponse)
+            if err != nil {
+                return fmt.Errorf("error formatting chunk: %v", err)
+            }
 
-		// Handle thinking state transitions and send appropriate markers only for thinking models
-		if isThinkingModel {
-			if isThought && !inThinking {
-				// Starting to think - send thinking start marker only once
-				thinkStartResponse := models.Response{
-					Message: "◁think▷",
-					Type:    "chunk",
-				}
-				msg, err := models.FormatSSEMessage(thinkStartResponse)
-				if err == nil {
-					fmt.Fprint(w, msg)
-					flusher.Flush()
-				}
-				inThinking = true
-			} else if !isThought && inThinking {
-				// Send thinking end marker
-				thinkEndResponse := models.Response{
-					Message: "◁/think▷",
-					Type:    "chunk",
-				}
-				msg, err := models.FormatSSEMessage(thinkEndResponse)
-				if err == nil {
-					fmt.Fprint(w, msg)
-					flusher.Flush()
-				}
-				inThinking = false
-			}
-		}
+            _, err = fmt.Fprint(w, msg)
+            if err != nil {
+                return fmt.Errorf("error sending chunk: %v", err)
+            }
+            flusher.Flush()
+        }
 
-		// Handle content based on whether it's thinking or regular content
-		if chunkText != "" {
-			// Send content chunks immediately - both thinking and regular content
-			chunkResponse := models.Response{
-				Message: chunkText,
-				Type:    "chunk",
-			}
+        // Check if done
+        if isFinal {
+            break
+        }
+    }
 
-			msg, err := models.FormatSSEMessage(chunkResponse)
-			if err != nil {
-				return fmt.Errorf("error formatting chunk: %v", err)
-			}
+    if err := scanner.Err(); err != nil {
+        return fmt.Errorf("error reading stream: %v", err)
+    }
 
-			_, err = fmt.Fprint(w, msg)
-			if err != nil {
-				return fmt.Errorf("error sending chunk: %v", err)
-			}
-			flusher.Flush()
-		}
+    // Send completion signal
+    finalResponse := models.Response{
+        Type:      "end",
+        Timestamp: time.Now().Format(time.RFC3339),
+    }
 
-		// Check if done
-		if isFinal {
-			break
-		}
-	}
+    msg, _ := models.FormatSSEMessage(finalResponse)
+    fmt.Fprint(w, msg)
+    flusher.Flush()
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading stream: %v", err)
-	}
+    logger.GetDailyLogger().Info("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
 
-	// Send completion signal
-	finalResponse := models.Response{
-		Type:      "end",
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	msg, _ := models.FormatSSEMessage(finalResponse)
-	fmt.Fprint(w, msg)
-	flusher.Flush()
-
-	logger.GetDailyLogger().Info("Gemini streaming completed for client %d: %d chunks in %.2fs", clientID, chunkCount, time.Since(startTime).Seconds())
-
-	return nil
+    return nil
 }
+
+
 
 // CallGeminiAPI calls Gemini API for non-streaming response
 func CallGeminiAPI(model, prompt string, isThinkingModel bool) (string, error) {
