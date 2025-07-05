@@ -1,4 +1,24 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    networks:
+      - backend-network
+    restart: always
+
   classifier:
     build:
       context: ./classifier
@@ -31,6 +51,7 @@ services:
       - PORT=8080
       - CLASSIFIER_URL=http://classifier:8000
       - GEMINI_API_BASE_URL=${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/models}
+      - REDIS_URL=redis://redis:6379
       - GOMAXPROCS=2
     deploy:
       resources:
@@ -43,6 +64,12 @@ services:
     networks:
       - backend-network
     restart: always
+    depends_on:
+      - redis
+
+volumes:
+  redis_data:
+    driver: local
 
 networks:
   backend-network:
