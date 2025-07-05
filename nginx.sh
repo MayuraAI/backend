@@ -40,12 +40,39 @@ server {
     add_header Referrer-Policy no-referrer-when-downgrade;
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
+    # CORS headers
+    add_header Access-Control-Allow-Origin "https://mayura.rocks" always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    add_header Access-Control-Max-Age "86400" always;
+
+    # Handle preflight requests
+    if (\$request_method = 'OPTIONS') {
+        add_header Access-Control-Allow-Origin "https://mayura.rocks" always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+        add_header Access-Control-Allow-Credentials "true" always;
+        add_header Access-Control-Max-Age "86400" always;
+        add_header Content-Length 0;
+        add_header Content-Type text/plain;
+        return 204;
+    }
+
     location / {
         proxy_pass http://localhost:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # Additional proxy settings for CORS
+        proxy_set_header Origin \$http_origin;
+        proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
+        proxy_hide_header Access-Control-Allow-Credentials;
+        proxy_hide_header Access-Control-Max-Age;
     }
 }
 EOF
