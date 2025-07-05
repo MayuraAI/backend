@@ -48,12 +48,11 @@ type Subscription struct {
 	// Subscription Details
 	Tier         string `json:"tier" dynamodbav:"tier"`                   // "free", "plus", "pro"
 	Status       string `json:"status" dynamodbav:"status"`               // "active", "cancelled", "expired", "trial"
-	BillingCycle string `json:"billing_cycle" dynamodbav:"billing_cycle"` // "monthly", "yearly"
+	// BillingCycle string `json:"billing_cycle" dynamodbav:"billing_cycle"` // "monthly", "yearly"
 
 	// Dates
-	StartDate    time.Time  `json:"start_date" dynamodbav:"start_date"`
-	EndDate      *time.Time `json:"end_date" dynamodbav:"end_date"`             // nil for active subscriptions
-	TrialEndDate *time.Time `json:"trial_end_date" dynamodbav:"trial_end_date"` // nil if no trial
+	// StartDate    time.Time  `json:"start_date" dynamodbav:"start_date"`
+	// EndDate      *time.Time `json:"end_date" dynamodbav:"end_date"`             // nil for active subscriptions
 
 	// LemonSqueezy Integration
 	LemonSqueezyCustomerID     string `json:"lemonsqueezy_customer_id" dynamodbav:"lemonsqueezy_customer_id"`
