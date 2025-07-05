@@ -132,9 +132,8 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
     
-    # Additional SSL Security Settings
+    # Additional SSL Security Settings (some may be in options-ssl-nginx.conf)
     ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
     ssl_session_tickets off;
     
     # Security Headers
