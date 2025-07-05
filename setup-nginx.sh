@@ -23,6 +23,10 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 sudo chmod 600 /etc/ssl/private/api.mayura.rocks.key
 sudo chmod 644 /etc/ssl/certs/api.mayura.rocks.crt
 
+# Copy rate limiting configuration
+echo "Installing rate limiting configuration..."
+sudo cp nginx-rate-limit.conf /etc/nginx/conf.d/
+
 # Copy nginx configuration
 echo "Installing nginx configuration..."
 sudo cp nginx.conf /etc/nginx/sites-available/api.mayura.rocks
