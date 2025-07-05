@@ -6,3 +6,4 @@ trufflehog/
 .DS_Store
 processing.log
 processing_checkpoint.json
+firebase_env.json

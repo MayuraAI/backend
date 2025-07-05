@@ -12,6 +12,7 @@ import (
 	"gateway/handlers"
 	"gateway/middleware"
 	"gateway/pkg/logger"
+	"gateway/pkg/redis"
 
 	"github.com/joho/godotenv"
 )
@@ -27,6 +28,20 @@ func getEnvWithDefault(key, defaultValue string) string {
 // setupRoutes configures all the HTTP routes
 func setupRoutes() http.Handler {
 	mux := http.NewServeMux()
+
+	// Setup all API routes (profiles, chats, messages)
+	handlers.SetupAPIRoutes(mux)
+
+	// Health check endpoint (no auth required)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "healthy", "message": "Server is running"}`))
+	})
 
 	// Metrics endpoint for monitoring
 	// mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -45,34 +60,39 @@ func setupRoutes() http.Handler {
 	// 	json.NewEncoder(w).Encode(metrics)
 	// })
 
-	// Protected route with rate limiting and Supabase auth middleware - only allow POST requests
-	mux.HandleFunc("/complete", func(w http.ResponseWriter, r *http.Request) {
+	// Protected route with rate limiting and Firebase auth middleware - only allow POST requests
+	mux.HandleFunc("/v1/complete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Apply rate limiting first, then authentication middleware
-		middleware.SupabaseAuthMiddleware(
-			middleware.RateLimitMiddleware(
-				http.HandlerFunc(handlers.ClientHandler),
-				middleware.GetDefaultConfig(),
+		// Apply CORS, then rate limiting, then authentication middleware
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				middleware.RateLimitMiddleware(
+					http.HandlerFunc(handlers.ClientHandler),
+					middleware.GetDefaultConfig(),
+				),
 			),
 		).ServeHTTP(w, r)
 	})
 
 	// Rate limit status endpoint - requires authentication
-	mux.HandleFunc("/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/rate-limit-status", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodOptions {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Apply authentication middleware (rate limiting not needed for status check)
-		middleware.SupabaseAuthMiddleware(
-			http.HandlerFunc(handlers.RateLimitStatusHandler)).ServeHTTP(w, r)
+		// Apply CORS, then authentication middleware (rate limiting not needed for status check)
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				http.HandlerFunc(handlers.RateLimitStatusHandler),
+			),
+		).ServeHTTP(w, r)
 	})
 
 	// Wrap with logging middleware to log ALL requests
-	return mux
+	return middleware.CORSMiddleware(mux)
 }
 
 func main() {
@@ -87,6 +107,15 @@ func main() {
 	// Set maximum number of CPUs to use
 	maxProcs := runtime.GOMAXPROCS(0)
 	logger.GetDailyLogger().Info("Gateway server initializing with %d CPU cores", maxProcs)
+
+	// Initialize Redis for rate limiting
+	redisURL := getEnvWithDefault("REDIS_URL", "redis://localhost:6379")
+	if err := redis.InitRedis(redisURL); err != nil {
+		logger.GetDailyLogger().Error("Failed to initialize Redis: %v", err)
+		logger.GetDailyLogger().Info("Continuing without Redis - rate limiting will be disabled")
+	} else {
+		logger.GetDailyLogger().Info("Successfully connected to Redis at %s", redisURL)
+	}
 
 	// Get port from environment
 	port := getEnvWithDefault("PORT", "8080")
@@ -133,5 +162,12 @@ func main() {
 		logger.GetDailyLogger().Error("Server forced to shutdown: %v", err)
 	} else {
 		logger.GetDailyLogger().Info("Server shutdown complete")
+	}
+
+	// Cleanup Redis connection
+	if err := redis.Close(); err != nil {
+		logger.GetDailyLogger().Error("Error closing Redis connection: %v", err)
+	} else {
+		logger.GetDailyLogger().Info("Redis connection closed")
 	}
 }
