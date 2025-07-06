@@ -80,7 +80,6 @@ services:
       - ./payment/firebase_env.json:/root/firebase_service_account.json:ro
     environment:
       - FIREBASE_SERVICE_ACCOUNT_PATH=/root/firebase_service_account.json
-      - DEVELOPMENT=true
     deploy:
       resources:
         limits:
