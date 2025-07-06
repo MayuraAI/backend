@@ -82,8 +82,9 @@ type WebhookPayload struct {
 			TestMode        bool    `json:"test_mode"`
 			BillingAnchor   int     `json:"billing_anchor"`
 			URLs            struct {
-				UpdatePaymentMethod string `json:"update_payment_method"`
-				CustomerPortal      string `json:"customer_portal"`
+				UpdatePaymentMethod              string `json:"update_payment_method"`
+				CustomerPortal                   string `json:"customer_portal"`
+				CustomerPortalUpdateSubscription string `json:"customer_portal_update_subscription"`
 			} `json:"urls"`
 			RenewsAt       *string                `json:"renews_at"`
 			EndsAt         *string                `json:"ends_at"`
@@ -207,9 +208,9 @@ func GetVariantTier(variantID int) string {
 	// Map variant IDs to subscription tiers
 	// These should match your LemonSqueezy product variant IDs
 	switch variantID {
-	case 123456: // Replace with your actual Plus variant ID
+	case 887309: // Plus variant ID
 		return "plus"
-	case 123457: // Replace with your actual Pro variant ID
+	case 887311: // Pro variant ID
 		return "pro"
 	default:
 		return "free"
@@ -221,9 +222,9 @@ func GetTierVariantID(tier string) int {
 	// Map subscription tiers to variant IDs
 	switch tier {
 	case "plus":
-		return 123456 // Replace with your actual Plus variant ID
+		return 887309 // Plus variant ID
 	case "pro":
-		return 123457 // Replace with your actual Pro variant ID
+		return 887311 // Pro variant ID
 	default:
 		return 0
 	}

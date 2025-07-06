@@ -80,15 +80,18 @@ func processWebhookEvent(payload lsz.WebhookPayload) error {
 
 	// Create subscription object
 	subscription := dynamo.Subscription{
-		UserID:     userID,
-		Tier:       tier,
-		VariantID:  payload.Data.Attributes.VariantID,
-		Status:     payload.Data.Attributes.Status,
-		SubID:      payload.Data.ID,
-		UpdatedAt:  time.Now(),
-		CreatedAt:  time.Now(),
-		CustomerID: fmt.Sprintf("%d", payload.Data.Attributes.CustomerID),
-		Email:      payload.Data.Attributes.UserEmail,
+		UserID:                              userID,
+		Tier:                                tier,
+		VariantID:                           payload.Data.Attributes.VariantID,
+		Status:                              payload.Data.Attributes.Status,
+		SubID:                               payload.Data.ID,
+		UpdatedAt:                           time.Now(),
+		CreatedAt:                           time.Now(),
+		CustomerID:                          fmt.Sprintf("%d", payload.Data.Attributes.CustomerID),
+		Email:                               payload.Data.Attributes.UserEmail,
+		CustomerPortalURL:                   payload.Data.Attributes.URLs.CustomerPortal,
+		UpdatePaymentMethodURL:              payload.Data.Attributes.URLs.UpdatePaymentMethod,
+		CustomerPortalUpdateSubscriptionURL: payload.Data.Attributes.URLs.CustomerPortalUpdateSubscription,
 	}
 
 	// Parse dates if available
@@ -106,6 +109,8 @@ func processWebhookEvent(payload lsz.WebhookPayload) error {
 		return handleSubscriptionUpdated(subscription)
 	case "subscription_cancelled":
 		return handleSubscriptionCancelled(subscription)
+	case "subscription_plan_changed":
+		return handleSubscriptionPlanChanged(subscription)
 	case "subscription_resumed":
 		return handleSubscriptionResumed(subscription)
 	case "subscription_expired":
@@ -258,6 +263,28 @@ func handleSubscriptionUnpaused(sub dynamo.Subscription) error {
 	}
 
 	sub.Status = "active"
+	sub.UpdatedAt = time.Now()
+
+	return dynamo.SaveSubscriptionDetailed(ctx, sub)
+}
+
+// handleSubscriptionPlanChanged handles subscription plan changes
+func handleSubscriptionPlanChanged(sub dynamo.Subscription) error {
+	ctx := context.Background()
+
+	// Get existing subscription to preserve created_at
+	existing, err := dynamo.GetSubscription(ctx, sub.UserID)
+	if err != nil {
+		return err
+	}
+
+	if existing != nil {
+		sub.CreatedAt = existing.CreatedAt
+	} else {
+		sub.CreatedAt = time.Now()
+	}
+
+	// Keep the current status (usually "active" when plan changes)
 	sub.UpdatedAt = time.Now()
 
 	return dynamo.SaveSubscriptionDetailed(ctx, sub)

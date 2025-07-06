@@ -43,6 +43,7 @@ EXPOSE 8081
 # Set environment variables
 ENV GIN_MODE=release
 ENV PORT=8081
+ENV FIREBASE_SERVICE_ACCOUNT_PATH=/root/firebase_env.json
 
 # Run the application
 CMD ["./main"] 
