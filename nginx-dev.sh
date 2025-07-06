@@ -62,27 +62,27 @@ server {
     listen 80;
     server_name localhost;
 
-    # Enable CORS for all origins (development only)
-    add_header 'Access-Control-Allow-Origin' '*' always;
-    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
-    add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
-    add_header 'Access-Control-Allow-Credentials' 'true' always;
-    add_header 'Access-Control-Max-Age' '86400' always;
-
-    # Handle OPTIONS requests for CORS preflight
-    if (\$request_method = 'OPTIONS') {
+    # Payment and subscription endpoints - route to payment service (port 8081)
+    location ~ ^/api/(checkout|tier|subscription|cancel-subscription|webhook) {
+        # Enable CORS for all origins (development only)
         add_header 'Access-Control-Allow-Origin' '*' always;
         add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
         add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
         add_header 'Access-Control-Allow-Credentials' 'true' always;
         add_header 'Access-Control-Max-Age' '86400' always;
-        add_header 'Content-Length' '0' always;
-        add_header 'Content-Type' 'text/plain; charset=utf-8' always;
-        return 204;
-    }
 
-    # Payment and subscription endpoints - route to payment service (port 8081)
-    location ~ ^/api/(checkout|tier|subscription|cancel-subscription|webhook) {
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         # Proxy to payment service
         proxy_pass http://localhost:8081;
         proxy_set_header Host \$host;
@@ -106,6 +106,25 @@ server {
 
     # Health check endpoint for payment service
     location /health {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8081;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -115,6 +134,25 @@ server {
 
     # Gateway service endpoints (port 8080)
     location /v1/ {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -131,6 +169,25 @@ server {
 
     # Classifier service endpoints (port 8082)
     location /classify/ {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8082;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -147,6 +204,25 @@ server {
 
     # Default route - gateway service
     location / {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -180,27 +256,27 @@ server {
     listen 80;
     server_name localhost;
 
-    # Enable CORS for all origins (development only)
-    add_header 'Access-Control-Allow-Origin' '*' always;
-    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
-    add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
-    add_header 'Access-Control-Allow-Credentials' 'true' always;
-    add_header 'Access-Control-Max-Age' '86400' always;
-
-    # Handle OPTIONS requests for CORS preflight
-    if (\$request_method = 'OPTIONS') {
+    # Payment and subscription endpoints - route to payment service (port 8081)
+    location ~ ^/api/(checkout|tier|subscription|cancel-subscription|webhook) {
+        # Enable CORS for all origins (development only)
         add_header 'Access-Control-Allow-Origin' '*' always;
         add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
         add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
         add_header 'Access-Control-Allow-Credentials' 'true' always;
         add_header 'Access-Control-Max-Age' '86400' always;
-        add_header 'Content-Length' '0' always;
-        add_header 'Content-Type' 'text/plain; charset=utf-8' always;
-        return 204;
-    }
 
-    # Payment and subscription endpoints - route to payment service (port 8081)
-    location ~ ^/api/(checkout|tier|subscription|cancel-subscription|webhook) {
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         # Proxy to payment service
         proxy_pass http://localhost:8081;
         proxy_set_header Host \$host;
@@ -224,6 +300,25 @@ server {
 
     # Health check endpoint for payment service
     location /health {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8081;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -233,6 +328,25 @@ server {
 
     # Gateway service endpoints (port 8080)
     location /v1/ {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -249,6 +363,25 @@ server {
 
     # Classifier service endpoints (port 8082)
     location /classify/ {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8082;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -265,6 +398,25 @@ server {
 
     # Default route - gateway service
     location / {
+        # Enable CORS for all origins (development only)
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+
+        # Handle OPTIONS requests for CORS preflight
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, X-Signature, Accept, Origin' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
+            return 204;
+        }
+
         proxy_pass http://localhost:8080;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
