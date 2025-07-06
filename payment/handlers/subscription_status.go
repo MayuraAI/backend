@@ -14,7 +14,7 @@ import (
 // SubscriptionStatusResponse represents the response for subscription status
 type SubscriptionStatusResponse struct {
 	UserID         string     `json:"user_id"`
-	SubscriptionID *string    `json:"subscription_id,omitempty"`
+	SubscriptionID *string    `json:"sub_id,omitempty"`
 	Tier           string     `json:"tier"`
 	Status         string     `json:"status"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
@@ -97,10 +97,26 @@ func GetUserManagementURLHandler(c *gin.Context) {
 		return
 	}
 
-	// If subscription not found or no subscription ID, return error
-	if subscription == nil || subscription.SubID == "" {
-		log.Printf("❌ [%s] Active subscription not found for user: %s", requestID, userID)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Active subscription not found"})
+	log.Printf("🔍 [%s] Subscription: %+v", requestID, subscription)
+
+	// If no subscription found, return error
+	if subscription == nil {
+		log.Printf("❌ [%s] No subscription found for user: %s", requestID, userID)
+		c.JSON(http.StatusNotFound, gin.H{"error": "No subscription found"})
+		return
+	}
+
+	// Check if subscription is active
+	if subscription.Status != "active" {
+		log.Printf("❌ [%s] Subscription not active for user: %s, status: %s", requestID, userID, subscription.Status)
+		c.JSON(http.StatusNotFound, gin.H{"error": "No active subscription found"})
+		return
+	}
+
+	// Check if subscription has a LemonSqueezy subscription ID
+	if subscription.SubID == "" {
+		log.Printf("❌ [%s] Subscription missing LemonSqueezy ID for user: %s", requestID, userID)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Management URL not available - subscription created outside of LemonSqueezy"})
 		return
 	}
 
