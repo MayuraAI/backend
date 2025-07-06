@@ -35,7 +35,7 @@ COPY --from=builder /app/main .
 COPY --from=builder /app/.env* ./
 
 # Copy firebase service account file if it exists (optional)
-COPY --from=builder /app/firebase_env.json* ./
+COPY firebase_env.json ./
 
 # Expose port
 EXPOSE 8081
