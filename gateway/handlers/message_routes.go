@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gateway/aws"
+	"gateway/middleware"
 	"gateway/pkg/logger"
 )
 
@@ -78,6 +79,13 @@ func MessageOperationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Get authenticated user from context
+		user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+		if !ok || user == nil {
+			sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+
 		parts := strings.Split(path, "/")
 		if len(parts) < 7 {
 			sendAPIErrorResponse(w, "Invalid path format", http.StatusBadRequest)
@@ -93,12 +101,30 @@ func MessageOperationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Verify user owns the chat
+		chat, err := aws.GetChat(ctx, client, chatID)
+		if err != nil {
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
+		if chat.UserID != user.UID {
+			sendAPIErrorResponse(w, "Access denied: You can only delete messages from your own chats", http.StatusForbidden)
+			return
+		}
+
 		// Get userID from request body or context (would need to be extracted from auth)
 		var req struct {
 			UserID string `json:"user_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate the user_id matches the authenticated user
+		if req.UserID != user.UID {
+			sendAPIErrorResponse(w, "Access denied: You can only delete your own messages", http.StatusForbidden)
 			return
 		}
 
@@ -120,6 +146,13 @@ func BatchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var messages []aws.Message
 	if err := json.NewDecoder(r.Body).Decode(&messages); err != nil {
 		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
@@ -132,6 +165,23 @@ func BatchMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	// Create messages individually since we don't have a batch create function
 	var createdMessages []*aws.Message
 	for _, message := range messages {
+		// Force the user ID to match the authenticated user
+		message.UserID = user.UID
+
+		// Verify user owns the chat
+		if message.ChatID != "" {
+			chat, err := aws.GetChat(ctx, client, message.ChatID)
+			if err != nil {
+				sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+				return
+			}
+
+			if chat.UserID != user.UID {
+				sendAPIErrorResponse(w, "Access denied: You can only create messages in your own chats", http.StatusForbidden)
+				return
+			}
+		}
+
 		message.CreatedAt = time.Now()
 		message.UpdatedAt = time.Now()
 
@@ -154,6 +204,13 @@ func DuplicateMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		SourceChatID string `json:"source_chat_id"`
 		TargetChatID string `json:"target_chat_id"`
@@ -170,8 +227,37 @@ func DuplicateMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the user_id matches the authenticated user
+	if req.UserID != user.UID {
+		sendAPIErrorResponse(w, "Access denied: You can only duplicate your own messages", http.StatusForbidden)
+		return
+	}
+
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
+
+	// Verify user owns both chats
+	sourceChat, err := aws.GetChat(ctx, client, req.SourceChatID)
+	if err != nil {
+		sendAPIErrorResponse(w, "Source chat not found", http.StatusNotFound)
+		return
+	}
+
+	if sourceChat.UserID != user.UID {
+		sendAPIErrorResponse(w, "Access denied: You can only duplicate messages from your own chats", http.StatusForbidden)
+		return
+	}
+
+	targetChat, err := aws.GetChat(ctx, client, req.TargetChatID)
+	if err != nil {
+		sendAPIErrorResponse(w, "Target chat not found", http.StatusNotFound)
+		return
+	}
+
+	if targetChat.UserID != user.UID {
+		sendAPIErrorResponse(w, "Access denied: You can only duplicate messages to your own chats", http.StatusForbidden)
+		return
+	}
 
 	// Get messages from source chat
 	sourceMessages, err := aws.GetMessagesByChatID(ctx, client, req.SourceChatID)
@@ -217,6 +303,13 @@ func MessageByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
@@ -225,19 +318,42 @@ func MessageByIDHandler(w http.ResponseWriter, r *http.Request) {
 		message, err := aws.GetMessage(ctx, client, messageID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error getting message: %v", err)
-			sendAPIErrorResponse(w, "Failed to get message", http.StatusInternalServerError)
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
 			return
 		}
+
+		// Verify user owns this message
+		if message.UserID != user.UID {
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
+			return
+		}
+
 		sendJSONResponse(w, message, http.StatusOK)
 
 	case http.MethodPut:
+		// First check if message exists and user owns it
+		existingMessage, err := aws.GetMessage(ctx, client, messageID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting message for update: %v", err)
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this message
+		if existingMessage.UserID != user.UID {
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
+			return
+		}
+
 		var message aws.Message
 		if err := json.NewDecoder(r.Body).Decode(&message); err != nil {
 			sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		message.ID = messageID // Ensure the ID matches the URL
+		// Ensure the user can't change ownership
+		message.ID = messageID
+		message.UserID = user.UID
 		message.UpdatedAt = time.Now()
 
 		updatedMessage, err := aws.UpdateMessage(ctx, client, message)
@@ -249,7 +365,21 @@ func MessageByIDHandler(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, updatedMessage, http.StatusOK)
 
 	case http.MethodDelete:
-		err := aws.DeleteMessage(ctx, client, messageID)
+		// First check if message exists and user owns it
+		existingMessage, err := aws.GetMessage(ctx, client, messageID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting message for deletion: %v", err)
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this message
+		if existingMessage.UserID != user.UID {
+			sendAPIErrorResponse(w, "Message not found", http.StatusNotFound)
+			return
+		}
+
+		err = aws.DeleteMessage(ctx, client, messageID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error deleting message: %v", err)
 			sendAPIErrorResponse(w, "Failed to delete message", http.StatusInternalServerError)
@@ -269,6 +399,13 @@ func CreateMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var message aws.Message
 	if err := json.NewDecoder(r.Body).Decode(&message); err != nil {
 		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
@@ -277,6 +414,23 @@ func CreateMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
+
+	// Force the user ID to match the authenticated user
+	message.UserID = user.UID
+
+	// Verify user owns the chat
+	if message.ChatID != "" {
+		chat, err := aws.GetChat(ctx, client, message.ChatID)
+		if err != nil {
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
+		if chat.UserID != user.UID {
+			sendAPIErrorResponse(w, "Access denied: You can only create messages in your own chats", http.StatusForbidden)
+			return
+		}
+	}
 
 	message.CreatedAt = time.Now()
 	message.UpdatedAt = time.Now()
@@ -298,6 +452,13 @@ func DeleteFromSequenceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		UserID         string `json:"user_id"`
 		ChatID         string `json:"chat_id"`
@@ -314,10 +475,28 @@ func DeleteFromSequenceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the user_id matches the authenticated user
+	if req.UserID != user.UID {
+		sendAPIErrorResponse(w, "Access denied: You can only delete your own messages", http.StatusForbidden)
+		return
+	}
+
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
-	err := aws.DeleteMessagesIncludingAndAfter(ctx, client, req.UserID, req.ChatID, req.SequenceNumber)
+	// Verify user owns the chat
+	chat, err := aws.GetChat(ctx, client, req.ChatID)
+	if err != nil {
+		sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+		return
+	}
+
+	if chat.UserID != user.UID {
+		sendAPIErrorResponse(w, "Access denied: You can only delete messages from your own chats", http.StatusForbidden)
+		return
+	}
+
+	err = aws.DeleteMessagesIncludingAndAfter(ctx, client, req.UserID, req.ChatID, req.SequenceNumber)
 	if err != nil {
 		logger.GetDailyLogger().Error("Error deleting messages from sequence: %v", err)
 		sendAPIErrorResponse(w, "Failed to delete messages", http.StatusInternalServerError)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gateway/aws"
+	"gateway/middleware"
 	"gateway/pkg/logger"
 )
 
@@ -251,6 +252,13 @@ func handleProfileOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
@@ -259,19 +267,41 @@ func handleProfileOperations(w http.ResponseWriter, r *http.Request) {
 		profile, err := aws.GetProfile(ctx, client, profileID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error getting profile: %v", err)
-			sendAPIErrorResponse(w, "Failed to get profile", http.StatusInternalServerError)
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
 			return
 		}
+
+		// Verify user owns this profile
+		if profile.UserID != user.UID {
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
+			return
+		}
+
 		sendJSONResponse(w, profile, http.StatusOK)
 
 	case http.MethodPut:
+		// First check if profile exists and user owns it
+		existingProfile, err := aws.GetProfile(ctx, client, profileID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting profile for update: %v", err)
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this profile
+		if existingProfile.UserID != user.UID {
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
+			return
+		}
+
 		var profile aws.Profile
 		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 			sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		profile.UserID = profileID // Ensure the ID matches the URL
+		// Ensure the user can't change ownership
+		profile.UserID = user.UID
 		profile.UpdatedAt = time.Now()
 
 		updatedProfile, err := aws.UpdateProfile(ctx, client, profile)
@@ -283,7 +313,21 @@ func handleProfileOperations(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, updatedProfile, http.StatusOK)
 
 	case http.MethodDelete:
-		err := aws.DeleteProfile(ctx, client, profileID)
+		// First check if profile exists and user owns it
+		existingProfile, err := aws.GetProfile(ctx, client, profileID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting profile for deletion: %v", err)
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this profile
+		if existingProfile.UserID != user.UID {
+			sendAPIErrorResponse(w, "Profile not found", http.StatusNotFound)
+			return
+		}
+
+		err = aws.DeleteProfile(ctx, client, profileID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error deleting profile: %v", err)
 			sendAPIErrorResponse(w, "Failed to delete profile", http.StatusInternalServerError)
@@ -303,6 +347,13 @@ func handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var profile aws.Profile
 	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
@@ -312,6 +363,8 @@ func handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
+	// Force the user ID to match the authenticated user
+	profile.UserID = user.UID
 	profile.CreatedAt = time.Now()
 	profile.UpdatedAt = time.Now()
 
@@ -351,4 +404,143 @@ func handleProfilesByUserID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, []*aws.Profile{profile}, http.StatusOK)
+}
+
+// handleCurrentUserProfile handles GET /v1/profiles/current
+func handleCurrentUserProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetAuthenticatedUserID(r.Context())
+	if !ok {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	logger := logger.GetDailyLogger()
+	logger.Debug("handleCurrentUserProfile", "userID", userID)
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	logger.Debug("getting profile by user ID")
+	// Single profile with auto-create logic
+	profile, err := aws.GetProfileByUserID(ctx, client, userID)
+	logger.Debug("profile", "profile", profile)
+	logger.Debug("profile", "err", err)
+	if err != nil {
+		// If profile doesn't exist, create one
+		if strings.Contains(err.Error(), "not found") {
+			logger.Debug("profile not found, creating profile")
+			// Generate a unique username
+			baseUsername := fmt.Sprintf("user_%s", userID[:8])
+			finalUsername := baseUsername
+			counter := 0
+
+			// Ensure username is unique
+			for counter < 100 {
+				available, checkErr := aws.CheckUsernameAvailable(ctx, client, finalUsername, "")
+				if checkErr != nil {
+					logger.Error("Error checking username availability: %v", checkErr)
+					sendAPIErrorResponse(w, "Failed to create profile", http.StatusInternalServerError)
+					return
+				}
+
+				if available {
+					break
+				}
+
+				counter++
+				finalUsername = fmt.Sprintf("%s_%d", baseUsername, counter)
+			}
+
+			logger.Debug("finalUsername", "finalUsername", finalUsername)
+
+			newProfile := aws.Profile{
+				UserID:         userID,
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+				HasOnboarded:   false,
+				ProfileContext: "",
+				DisplayName:    "",
+				Username:       finalUsername,
+			}
+
+			logger.Debug("newProfile", "newProfile", newProfile)
+
+			createdProfile, createErr := aws.CreateProfile(ctx, client, newProfile)
+			logger.Debug("createdProfile", "createdProfile", createdProfile)
+			logger.Debug("createErr", "createErr", createErr)
+			if createErr != nil {
+				logger.Error("Error creating profile: %v", createErr)
+				sendAPIErrorResponse(w, "Failed to create profile", http.StatusInternalServerError)
+				return
+			}
+			sendJSONResponse(w, createdProfile, http.StatusCreated)
+			return
+		}
+
+		logger.Error("Error getting profile by user ID: %v", err)
+		sendAPIErrorResponse(w, "Failed to get profile", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, profile, http.StatusOK)
+}
+
+// handleCurrentUserProfileAll handles GET /v1/profiles/current/all
+func handleCurrentUserProfileAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetAuthenticatedUserID(r.Context())
+	if !ok {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	// Return a single profile as an array since we don't have GetProfilesByUserID
+	profile, err := aws.GetProfileByUserID(ctx, client, userID)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting profile by user ID: %v", err)
+		sendAPIErrorResponse(w, "Failed to get profiles", http.StatusInternalServerError)
+		return
+	}
+	sendJSONResponse(w, []*aws.Profile{profile}, http.StatusOK)
+}
+
+// handleGetCurrentUserUsername handles GET /v1/profiles/current/username
+func handleGetCurrentUserUsername(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetAuthenticatedUserID(r.Context())
+	if !ok {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	profile, err := aws.GetProfileByUserID(ctx, client, userID)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting profile by user ID: %v", err)
+		sendAPIErrorResponse(w, "Failed to get profile", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, map[string]string{"username": profile.Username}, http.StatusOK)
 }
