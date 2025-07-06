@@ -25,11 +25,25 @@ func getEnvWithDefault(key, defaultValue string) string {
 
 // Init initializes the DynamoDB client
 func Init() error {
+	// Check if we're in development mode
+	if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+		// Check if AWS credentials are available
+		awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+		awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+		if awsAccessKey == "" || awsSecretKey == "" {
+			fmt.Println("Warning: Running in development mode without AWS credentials")
+			fmt.Println("DynamoDB operations will be simulated")
+			return nil
+		}
+	}
+
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to load AWS config: %v", err)
 	}
 	Client = dynamodb.NewFromConfig(cfg)
+	fmt.Println("DynamoDB client initialized successfully")
 	return nil
 }
 
@@ -52,6 +66,16 @@ type Subscription struct {
 
 // SaveSubscription saves subscription data to DynamoDB
 func SaveSubscription(ctx context.Context, uid string, tier string, variantID int, subID string, status string) error {
+	// Handle development mode without DynamoDB
+	if Client == nil {
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			fmt.Printf("Development mode: Would save subscription for user %s (tier: %s, status: %s)\n",
+				uid, tier, status)
+			return nil
+		}
+		return fmt.Errorf("dynamodb client not initialized")
+	}
+
 	now := time.Now()
 
 	_, err := Client.PutItem(ctx, &dynamodb.PutItemInput{
@@ -71,6 +95,16 @@ func SaveSubscription(ctx context.Context, uid string, tier string, variantID in
 
 // SaveSubscriptionDetailed saves detailed subscription data to DynamoDB
 func SaveSubscriptionDetailed(ctx context.Context, sub Subscription) error {
+	// Handle development mode without DynamoDB
+	if Client == nil {
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			fmt.Printf("Development mode: Would save subscription for user %s (tier: %s, status: %s)\n",
+				sub.UserID, sub.Tier, sub.Status)
+			return nil
+		}
+		return fmt.Errorf("dynamodb client not initialized")
+	}
+
 	item := map[string]types.AttributeValue{
 		"user_id":    &types.AttributeValueMemberS{Value: sub.UserID},
 		"tier":       &types.AttributeValueMemberS{Value: sub.Tier},
@@ -110,6 +144,22 @@ func SaveSubscriptionDetailed(ctx context.Context, sub Subscription) error {
 
 // GetSubscription retrieves subscription data from DynamoDB
 func GetSubscription(ctx context.Context, uid string) (*Subscription, error) {
+	// Handle development mode without DynamoDB
+	if Client == nil {
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			fmt.Printf("Development mode: Would get subscription for user %s\n", uid)
+			// Return a mock subscription for development
+			return &Subscription{
+				UserID:    uid,
+				Tier:      "free",
+				Status:    "active",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}, nil
+		}
+		return nil, fmt.Errorf("dynamodb client not initialized")
+	}
+
 	out, err := Client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(TableName),
 		Key: map[string]types.AttributeValue{
@@ -216,6 +266,15 @@ func GetSubscription(ctx context.Context, uid string) (*Subscription, error) {
 
 // DeleteSubscription removes subscription data from DynamoDB
 func DeleteSubscription(ctx context.Context, uid string) error {
+	// Handle development mode without DynamoDB
+	if Client == nil {
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			fmt.Printf("Development mode: Would delete subscription for user %s\n", uid)
+			return nil
+		}
+		return fmt.Errorf("dynamodb client not initialized")
+	}
+
 	_, err := Client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(TableName),
 		Key: map[string]types.AttributeValue{
