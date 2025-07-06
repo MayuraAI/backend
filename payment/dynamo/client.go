@@ -35,16 +35,19 @@ func Init() error {
 
 // Subscription represents a user's subscription data
 type Subscription struct {
-	UserID     string     `json:"user_id"`
-	Tier       string     `json:"tier"`
-	VariantID  int        `json:"variant_id"`
-	Status     string     `json:"status"`
-	SubID      string     `json:"sub_id"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	CustomerID string     `json:"customer_id,omitempty"`
-	Email      string     `json:"email,omitempty"`
+	UserID                              string     `json:"user_id"`
+	Tier                                string     `json:"tier"`
+	VariantID                           int        `json:"variant_id"`
+	Status                              string     `json:"status"`
+	SubID                               string     `json:"sub_id"`
+	UpdatedAt                           time.Time  `json:"updated_at"`
+	CreatedAt                           time.Time  `json:"created_at"`
+	ExpiresAt                           *time.Time `json:"expires_at,omitempty"`
+	CustomerID                          string     `json:"customer_id,omitempty"`
+	Email                               string     `json:"email,omitempty"`
+	CustomerPortalURL                   string     `json:"customer_portal_url,omitempty"`
+	UpdatePaymentMethodURL              string     `json:"update_payment_method_url,omitempty"`
+	CustomerPortalUpdateSubscriptionURL string     `json:"customer_portal_update_subscription_url,omitempty"`
 }
 
 // SaveSubscription saves subscription data to DynamoDB
@@ -87,6 +90,15 @@ func SaveSubscriptionDetailed(ctx context.Context, sub Subscription) error {
 	}
 	if sub.Email != "" {
 		item["email"] = &types.AttributeValueMemberS{Value: sub.Email}
+	}
+	if sub.CustomerPortalURL != "" {
+		item["customer_portal_url"] = &types.AttributeValueMemberS{Value: sub.CustomerPortalURL}
+	}
+	if sub.UpdatePaymentMethodURL != "" {
+		item["update_payment_method_url"] = &types.AttributeValueMemberS{Value: sub.UpdatePaymentMethodURL}
+	}
+	if sub.CustomerPortalUpdateSubscriptionURL != "" {
+		item["customer_portal_update_subscription_url"] = &types.AttributeValueMemberS{Value: sub.CustomerPortalUpdateSubscriptionURL}
 	}
 
 	_, err := Client.PutItem(ctx, &dynamodb.PutItemInput{
@@ -178,6 +190,24 @@ func GetSubscription(ctx context.Context, uid string) (*Subscription, error) {
 	if val, ok := out.Item["email"]; ok {
 		if s, ok := val.(*types.AttributeValueMemberS); ok {
 			sub.Email = s.Value
+		}
+	}
+
+	if val, ok := out.Item["customer_portal_url"]; ok {
+		if s, ok := val.(*types.AttributeValueMemberS); ok {
+			sub.CustomerPortalURL = s.Value
+		}
+	}
+
+	if val, ok := out.Item["update_payment_method_url"]; ok {
+		if s, ok := val.(*types.AttributeValueMemberS); ok {
+			sub.UpdatePaymentMethodURL = s.Value
+		}
+	}
+
+	if val, ok := out.Item["customer_portal_update_subscription_url"]; ok {
+		if s, ok := val.(*types.AttributeValueMemberS); ok {
+			sub.CustomerPortalUpdateSubscriptionURL = s.Value
 		}
 	}
 

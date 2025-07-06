@@ -78,6 +78,7 @@ func setupRoutes(r *gin.Engine) {
 		api.POST("/checkout", handlers.CreateCheckoutHandler)
 		api.GET("/tier", handlers.GetUserTierHandler)
 		api.GET("/subscription", handlers.GetSubscriptionDetailsHandler)
+		api.GET("/subscription/urls", handlers.GetSubscriptionURLsHandler)
 		api.POST("/cancel-subscription", handlers.CancelSubscriptionHandler)
 
 		// Webhook endpoint (no auth required, signature verified)
@@ -134,6 +135,7 @@ func main() {
 	log.Println("  POST /api/checkout - Create checkout session")
 	log.Println("  GET  /api/tier - Get user subscription tier")
 	log.Println("  GET  /api/subscription - Get subscription details")
+	log.Println("  GET  /api/subscription/urls - Get subscription management URLs")
 	log.Println("  POST /api/cancel-subscription - Cancel subscription")
 	log.Println("  POST /api/webhook - LemonSqueezy webhook handler")
 
