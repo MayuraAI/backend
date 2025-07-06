@@ -23,6 +23,8 @@ services:
     build:
       context: ./classifier
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     deploy:
       resources:
         limits:
@@ -49,7 +51,7 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      - CLASSIFIER_URL=http://classifier:8000
+      - CLASSIFIER_URL=http://localhost:8000
       - GEMINI_API_BASE_URL=${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/models}
       - REDIS_URL=redis://redis:6379
       - PAYMENT_SERVICE_URL=http://payment:8081

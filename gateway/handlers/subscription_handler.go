@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"gateway/config"
+	"gateway/middleware"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -151,44 +151,31 @@ func (h *SubscriptionHandler) createDefaultSubscription(userID string) *UserSubs
 	}
 }
 
-// getUserUsageStats retrieves current usage statistics
+// getUserUsageStats retrieves current usage statistics using the new rate limiting system
 func (h *SubscriptionHandler) getUserUsageStats(userID string, tier config.SubscriptionTier) (*UserUsageStats, error) {
-	// Get current usage from Redis
-	usageKey := fmt.Sprintf("usage:%s", userID)
+	// Get usage key based on tier
+	var usageKey string
+	var isAnonymous bool
 
-	// For anonymous users, use a different key pattern
 	if tier == config.TierAnonymous {
-		usageKey = fmt.Sprintf("usage:anon:%s", userID)
+		usageKey = fmt.Sprintf("anonymous:%s", userID)
+		isAnonymous = true
+	} else {
+		usageKey = fmt.Sprintf("user:%s", userID)
+		isAnonymous = false
 	}
 
-	// Get usage data
-	usageData, err := h.RedisClient.HGetAll(context.Background(), usageKey).Result()
+	// Get usage info from the rate limiting system
+	ctx := context.Background()
+	freeCount, proCount, resetTime, _, _, err := middleware.GetUsageInfo(ctx, usageKey, tier, isAnonymous)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get usage data: %w", err)
 	}
 
 	usage := &UserUsageStats{
-		FreeRequestsUsed: 0,
-		ProRequestsUsed:  0,
-		LastReset:        time.Now(),
-	}
-
-	if freeUsed, exists := usageData["free_requests"]; exists {
-		if val, err := strconv.Atoi(freeUsed); err == nil {
-			usage.FreeRequestsUsed = val
-		}
-	}
-
-	if proUsed, exists := usageData["pro_requests"]; exists {
-		if val, err := strconv.Atoi(proUsed); err == nil {
-			usage.ProRequestsUsed = val
-		}
-	}
-
-	if lastReset, exists := usageData["last_reset"]; exists {
-		if val, err := time.Parse(time.RFC3339, lastReset); err == nil {
-			usage.LastReset = val
-		}
+		FreeRequestsUsed: freeCount,
+		ProRequestsUsed:  proCount,
+		LastReset:        resetTime,
 	}
 
 	return usage, nil

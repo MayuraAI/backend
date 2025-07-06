@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"sync"
@@ -82,19 +81,19 @@ type CircuitBreaker struct {
 var (
 	// Circuit breaker for classifier service
 	classifierCircuit = &CircuitBreaker{
-		failureThreshold: 5,
-		recoveryTimeout:  30 * time.Second,
-		halfOpenMaxCalls: 3,
+		failureThreshold: 3,                // Reduced threshold for faster fallback
+		recoveryTimeout:  60 * time.Second, // Longer recovery time
+		halfOpenMaxCalls: 2,
 	}
 
 	// Optimized HTTP client for classifier requests
 	classifierClient = &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 10 * time.Second, // Reduced timeout for faster fallback
 		Transport: &http.Transport{
 			MaxIdleConns:        50,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
+			TLSHandshakeTimeout: 5 * time.Second, // Reduced timeout
 			DisableKeepAlives:   false,
 			DisableCompression:  false,
 		},
@@ -107,6 +106,91 @@ func getClassifierURL() string {
 		return url
 	}
 	return "http://localhost:8000" // Default for local development
+}
+
+// createFallbackResponse creates a default response when classifier is unavailable
+func createFallbackResponse(requestType middleware.RequestType) ModelResponse {
+	// Choose models based on request type
+	var primaryModel, primaryDisplayName string
+	var secondaryModel, secondaryDisplayName string
+
+	if requestType == middleware.ProRequest {
+		// For pro requests, use better models
+		primaryModel = "claude-3-5-sonnet-20241022"
+		primaryDisplayName = "Claude 3.5 Sonnet"
+		secondaryModel = "gpt-4o"
+		secondaryDisplayName = "GPT-4o"
+	} else {
+		// For free requests, use more affordable models
+		primaryModel = "claude-3-haiku-20240307"
+		primaryDisplayName = "Claude 3 Haiku"
+		secondaryModel = "gpt-4o-mini"
+		secondaryDisplayName = "GPT-4o Mini"
+	}
+
+	defaultModel := "gemini-1.5-flash"
+	defaultDisplayName := "Gemini 1.5 Flash"
+
+	// Create model scores for the fallback response
+	modelScores := map[string]ModelScore{
+		primaryModel: {
+			QualityScore:      0.9,
+			NormalizedQuality: 0.9,
+			Cost:              0.7,
+			NormalizedCost:    0.7,
+			FinalScore:        0.8,
+			Tier:              string(requestType),
+			Provider:          "openrouter",
+			DisplayName:       primaryDisplayName,
+			ProviderModelName: primaryModel,
+			IsThinkingModel:   false,
+		},
+		secondaryModel: {
+			QualityScore:      0.85,
+			NormalizedQuality: 0.85,
+			Cost:              0.6,
+			NormalizedCost:    0.6,
+			FinalScore:        0.75,
+			Tier:              string(requestType),
+			Provider:          "openrouter",
+			DisplayName:       secondaryDisplayName,
+			ProviderModelName: secondaryModel,
+			IsThinkingModel:   false,
+		},
+		defaultModel: {
+			QualityScore:      0.8,
+			NormalizedQuality: 0.8,
+			Cost:              0.3,
+			NormalizedCost:    0.3,
+			FinalScore:        0.7,
+			Tier:              string(requestType),
+			Provider:          "gemini",
+			DisplayName:       defaultDisplayName,
+			ProviderModelName: defaultModel,
+			IsThinkingModel:   false,
+		},
+	}
+
+	return ModelResponse{
+		PrimaryModel:              primaryModel,
+		PrimaryModelDisplayName:   primaryDisplayName,
+		SecondaryModel:            secondaryModel,
+		SecondaryModelDisplayName: secondaryDisplayName,
+		DefaultModel:              defaultModel,
+		DefaultModelDisplayName:   defaultDisplayName,
+		Metadata: ModelResponseMetadata{
+			ProcessingTime:        0.001, // Minimal processing time for fallback
+			PredictedCategory:     "general",
+			CategoryProbabilities: map[string]float64{"general": 1.0},
+			RequestType:           string(requestType),
+			AvailableModels:       3,
+			ModelScores:           modelScores,
+			PrimaryModel:          primaryModel,
+			SecondaryModel:        secondaryModel,
+			DefaultModel:          defaultModel,
+			Confidence:            0.5, // Lower confidence for fallback
+		},
+	}
 }
 
 // Circuit breaker methods
@@ -162,14 +246,21 @@ func (cb *CircuitBreaker) setState(state CircuitState) {
 
 // CallModelService calls the local model service with optimizations and request type
 func CallModelService(prompt string, requestType middleware.RequestType) (ModelResponse, error) {
-	// Check circuit breaker
+	logger.GetDailyLogger().Info("🚨🚨🚨 FALLBACK DEBUG: CallModelService function started - checking for classifier service 🚨🚨🚨")
+	logger.GetDailyLogger().Info("CallModelService called with requestType: %s", requestType)
+
+	// Check circuit breaker - if open, immediately return fallback
 	if !classifierCircuit.canExecute() {
-		return ModelResponse{}, fmt.Errorf("classifier service circuit breaker is open")
+		logger.GetDailyLogger().Warn("🔴 Classifier service circuit breaker is open, using fallback response")
+		return createFallbackResponse(requestType), nil
 	}
+
+	logger.GetDailyLogger().Info("Circuit breaker allows execution, trying classifier service")
 
 	// If circuit breaker is in half-open state, transition it
 	if classifierCircuit.state == Open && time.Since(classifierCircuit.lastFailureTime) >= classifierCircuit.recoveryTimeout {
 		classifierCircuit.setState(HalfOpen)
+		logger.GetDailyLogger().Info("Circuit breaker transitioned to half-open state")
 	}
 
 	// Convert RequestType to string
@@ -186,18 +277,22 @@ func CallModelService(prompt string, requestType middleware.RequestType) (ModelR
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return ModelResponse{}, fmt.Errorf("error marshaling request: %v", err)
+		logger.GetDailyLogger().Error("Error marshaling request, using fallback: %v", err)
+		return createFallbackResponse(requestType), nil
 	}
 
 	// Create request with context and timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second) // Reduced timeout
 	defer cancel()
 
 	classifierURL := getClassifierURL()
+	logger.GetDailyLogger().Info("🔍 Attempting to call classifier at: %s", classifierURL)
+
 	req, err := http.NewRequestWithContext(ctx, "POST", classifierURL+"/complete", bytes.NewBuffer(jsonData))
 	if err != nil {
 		classifierCircuit.onFailure()
-		return ModelResponse{}, fmt.Errorf("error creating request: %v", err)
+		logger.GetDailyLogger().Error("❌ Error creating classifier request, using fallback: %v", err)
+		return createFallbackResponse(requestType), nil
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -208,27 +303,31 @@ func CallModelService(prompt string, requestType middleware.RequestType) (ModelR
 	resp, err := classifierClient.Do(req)
 	if err != nil {
 		classifierCircuit.onFailure()
-		return ModelResponse{}, fmt.Errorf("error calling model service: %v", err)
+		logger.GetDailyLogger().Error("❌ Error calling classifier service, using fallback: %v", err)
+		logger.GetDailyLogger().Info("Circuit breaker failure count now: %d", classifierCircuit.failureCount)
+		return createFallbackResponse(requestType), nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		classifierCircuit.onFailure()
-		return ModelResponse{}, fmt.Errorf("classifier service returned status %d", resp.StatusCode)
+		logger.GetDailyLogger().Error("❌ Classifier service returned status %d, using fallback", resp.StatusCode)
+		return createFallbackResponse(requestType), nil
 	}
 
 	// Parse the response
 	var modelResp ModelResponse
 	if err := json.NewDecoder(resp.Body).Decode(&modelResp); err != nil {
 		classifierCircuit.onFailure()
-		return ModelResponse{}, fmt.Errorf("error decoding response: %v", err)
+		logger.GetDailyLogger().Error("❌ Error decoding classifier response, using fallback: %v", err)
+		return createFallbackResponse(requestType), nil
 	}
 
 	// Success - update circuit breaker
 	classifierCircuit.onSuccess()
 
 	// Log the response for debugging
-	logger.GetDailyLogger().Info("Model service response: %s (primary), %s (secondary)", modelResp.PrimaryModel, modelResp.SecondaryModel)
+	logger.GetDailyLogger().Info("✅ Model service response: %s (primary), %s (secondary)", modelResp.PrimaryModel, modelResp.SecondaryModel)
 
 	return modelResp, nil
 }
@@ -244,8 +343,21 @@ func GetCircuitBreakerStats() map[string]interface{} {
 	classifierCircuit.mu.RLock()
 	defer classifierCircuit.mu.RUnlock()
 
+	var stateStr string
+	switch classifierCircuit.state {
+	case Closed:
+		stateStr = "closed"
+	case Open:
+		stateStr = "open"
+	case HalfOpen:
+		stateStr = "half-open"
+	}
+
 	return map[string]interface{}{
-		"circuit_state": classifierCircuit.state,
-		"failure_count": classifierCircuit.failureCount,
+		"circuit_state":        stateStr,
+		"failure_count":        classifierCircuit.failureCount,
+		"last_failure_time":    classifierCircuit.lastFailureTime,
+		"failure_threshold":    classifierCircuit.failureThreshold,
+		"recovery_timeout_sec": int(classifierCircuit.recoveryTimeout.Seconds()),
 	}
 }
