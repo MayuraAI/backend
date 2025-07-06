@@ -1,0 +1,42 @@
+anonymous:
+  free_requests: 5        # 5 free requests total (lifetime)
+  pro_requests: 0         # 0 pro requests
+  requests_per_day: 5     # Total lifetime limit
+  daily_reset: false      # No daily reset for anonymous (lifetime limit)
+  requests_per_minute: 3  # Rate limit per minute
+  lifetime_limit: true    # This is a lifetime limit, not daily
+
+free:
+  free_requests: 100      # 100 free requests per day
+  pro_requests: 0         # 0 pro requests per day
+  requests_per_day: 100   # Total daily limit for free requests
+  daily_reset: true       # Reset daily at midnight
+  requests_per_minute: 5  # Rate limit per minute
+  lifetime_limit: false   # Daily limit, not lifetime
+
+plus:
+  free_requests: -1       # Unlimited free requests
+  pro_requests: 50        # 50 pro requests per day
+  requests_per_day: 50    # Total daily limit for pro requests
+  daily_reset: true       # Reset daily at midnight
+  requests_per_minute: 10 # Rate limit per minute
+  lifetime_limit: false   # Daily limit, not lifetime
+
+pro:
+  free_requests: -1       # Unlimited free requests
+  pro_requests: 100       # 100 pro requests per day
+  requests_per_day: 100   # Total daily limit for pro requests
+  daily_reset: true       # Reset daily at midnight
+  requests_per_minute: 15 # Rate limit per minute
+  lifetime_limit: false   # Daily limit, not lifetime
+
+# Global settings
+suspicious_activity:
+  threshold: 15               # Max requests in window before blocking
+  window: 300                 # 5 minutes in seconds
+  block_duration: 3600        # 1 hour in seconds
+  tracking_window: 600        # 10 minutes in seconds
+
+cleanup:
+  interval: 86400             # 24 hours in seconds
+  ttl: 172800                 # 48 hours in seconds 

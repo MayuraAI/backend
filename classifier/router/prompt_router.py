@@ -358,6 +358,7 @@ class PromptRouter:
         else:
             # Use ML classification
             category_probs = await self.classifier.classify_prompt(prompt)
+            print(f"Category probabilities: {category_probs}")
             # log category probs
             for category, prob in category_probs.items():
                 DailyLogger().info(f"Category: {category}, Probability: {prob}")
