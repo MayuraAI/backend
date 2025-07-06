@@ -9,6 +9,7 @@ import (
 	"payment/handlers"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 // getEnvWithDefault returns environment variable value or default if not set
@@ -87,6 +88,13 @@ func setupRoutes(r *gin.Engine) {
 }
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: Error loading .env file: %v", err)
+		log.Println("Continuing with system environment variables...")
+	} else {
+		log.Println("Successfully loaded .env file")
+	}
+
 	// Set Gin mode based on environment
 	ginMode := getEnvWithDefault("GIN_MODE", "release")
 	gin.SetMode(ginMode)
