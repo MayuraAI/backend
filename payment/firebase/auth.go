@@ -23,33 +23,53 @@ func InitFirebase() error {
 	// Option 1: Using service account key file
 	serviceAccountPath := os.Getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
 	if serviceAccountPath != "" {
-		opt := option.WithCredentialsFile(serviceAccountPath)
-		app, err = firebase.NewApp(ctx, nil, opt)
-		if err != nil {
-			return fmt.Errorf("firebase init failed: %v", err)
+		// Check if file exists
+		if _, err := os.Stat(serviceAccountPath); err == nil {
+			opt := option.WithCredentialsFile(serviceAccountPath)
+			app, err = firebase.NewApp(ctx, nil, opt)
+			if err != nil {
+				return fmt.Errorf("firebase init with file failed: %v", err)
+			}
+		} else {
+			fmt.Printf("Warning: Firebase service account file not found at %s\n", serviceAccountPath)
 		}
-	} else {
-		// Option 2: Using service account JSON from environment variable
+	}
+
+	// Option 2: Using service account JSON from environment variable
+	if app == nil {
 		serviceAccountJSON := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 		if serviceAccountJSON != "" {
 			opt := option.WithCredentialsJSON([]byte(serviceAccountJSON))
 			app, err = firebase.NewApp(ctx, nil, opt)
 			if err != nil {
-				return fmt.Errorf("firebase init failed: %v", err)
-			}
-		} else {
-			// Option 3: Using default credentials (for Google Cloud environments)
-			app, err = firebase.NewApp(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("firebase init failed: %v", err)
+				return fmt.Errorf("firebase init with JSON failed: %v", err)
 			}
 		}
 	}
 
+	// Option 3: Using default credentials (for Google Cloud environments)
+	if app == nil {
+		// Check if we're in a development environment
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			fmt.Println("Warning: Running in development mode without Firebase credentials")
+			// Create a mock auth client for development
+			return nil
+		}
+
+		// Try default credentials for production
+		app, err = firebase.NewApp(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("firebase init with default credentials failed: %v", err)
+		}
+	}
+
 	// Initialize Auth client
-	AuthClient, err = app.Auth(ctx)
-	if err != nil {
-		return fmt.Errorf("auth client init failed: %v", err)
+	if app != nil {
+		AuthClient, err = app.Auth(ctx)
+		if err != nil {
+			return fmt.Errorf("auth client init failed: %v", err)
+		}
+		fmt.Println("Firebase initialized successfully")
 	}
 
 	return nil
@@ -57,6 +77,15 @@ func InitFirebase() error {
 
 // VerifyIDToken verifies the Firebase ID token and returns the user UID
 func VerifyIDToken(ctx context.Context, idToken string) (string, error) {
+	if AuthClient == nil {
+		// For development without Firebase
+		if os.Getenv("DEVELOPMENT") == "true" || os.Getenv("GIN_MODE") == "debug" {
+			// Return a mock user ID for development
+			return "dev-user-123", nil
+		}
+		return "", fmt.Errorf("firebase auth client not initialized")
+	}
+
 	token, err := AuthClient.VerifyIDToken(ctx, idToken)
 	if err != nil {
 		return "", err
@@ -66,5 +95,8 @@ func VerifyIDToken(ctx context.Context, idToken string) (string, error) {
 
 // GetUserRecord retrieves user information from Firebase
 func GetUserRecord(ctx context.Context, uid string) (*auth.UserRecord, error) {
+	if AuthClient == nil {
+		return nil, fmt.Errorf("firebase auth client not initialized")
+	}
 	return AuthClient.GetUser(ctx, uid)
 }

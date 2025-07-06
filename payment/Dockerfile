@@ -1,49 +1,39 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install git (needed for go mod download)
+# Install git to support go modules from private repos (if needed)
 RUN apk add --no-cache git
 
-# Copy go mod files
+# Copy Go module files and download dependencies
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
+# Copy application source
 COPY . .
 
-# Build the application
+# Build Go binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS requests
+# Install CA certs for HTTPS requests
 RUN apk --no-cache add ca-certificates
 
-# Create app directory
+# Working directory for app
 WORKDIR /root/
 
-# Copy the binary from builder stage
+# Copy built binary
 COPY --from=builder /app/main .
 
-# Copy .env file if it exists (optional)
-COPY --from=builder /app/.env* ./
-
-# Copy firebase service account file if it exists (optional)
-COPY firebase_env.json ./
-
-# Expose port
+# Expose app port
 EXPOSE 8081
 
-# Set environment variables
+# Set default environment variables (can be overridden by docker-compose or .env)
 ENV GIN_MODE=release
 ENV PORT=8081
-ENV FIREBASE_SERVICE_ACCOUNT_PATH=/root/firebase_env.json
 
-# Run the application
-CMD ["./main"] 
+# Start the service
+CMD ["./main"]

@@ -73,20 +73,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8081:8081"
+    env_file:
+      - ./payment/.env
+    volumes:
+      - ./payment/firebase_env.json:/root/firebase_service_account.json:ro
     environment:
-      - PORT=8081
-      - GIN_MODE=release
-      - DYNAMO_TABLE=${DYNAMO_TABLE:-subscriptions}
-      - LSZ_API_KEY=${LSZ_API_KEY}
-      - LSZ_WEBHOOK_SECRET=${LSZ_WEBHOOK_SECRET}
-      - LSZ_STORE_ID=${LSZ_STORE_ID}
-      - LSZ_REDIRECT_URL=${LSZ_REDIRECT_URL}
-      - LSZ_RECEIPT_URL=${LSZ_RECEIPT_URL}
-      - FIREBASE_SERVICE_ACCOUNT_PATH=${FIREBASE_SERVICE_ACCOUNT_PATH}
-      - FIREBASE_SERVICE_ACCOUNT_JSON=${FIREBASE_SERVICE_ACCOUNT_JSON}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - FIREBASE_SERVICE_ACCOUNT_PATH=/root/firebase_service_account.json
     deploy:
       resources:
         limits:
