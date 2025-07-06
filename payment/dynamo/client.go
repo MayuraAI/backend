@@ -207,7 +207,9 @@ func SaveSubscription(ctx context.Context, sub Subscription) error {
 
 	// Marshal the subscription
 	log.Printf("🔄 [%s] Marshaling subscription data...", requestID)
-	item, err := attributevalue.MarshalMap(sub)
+	item, err := attributevalue.MarshalMapWithOptions(sub, func(o *attributevalue.EncoderOptions) {
+		o.TagKey = "dynamodb"
+	})
 	if err != nil {
 		log.Printf("❌ [%s] Failed to marshal subscription: %v", requestID, err)
 		return fmt.Errorf("failed to marshal subscription: %w", err)
@@ -272,16 +274,46 @@ func SaveSubscriptionDetailed(ctx context.Context, sub Subscription) error {
 	sub.UpdatedAt = time.Now()
 	log.Printf("📅 [%s] Updated modification time: %s", requestID, sub.UpdatedAt.Format(time.RFC3339))
 
-	// Marshal the subscription
-	log.Printf("🔄 [%s] Marshaling detailed subscription data...", requestID)
-	item, err := attributevalue.MarshalMap(sub)
-	if err != nil {
-		log.Printf("❌ [%s] Failed to marshal detailed subscription: %v", requestID, err)
-		return fmt.Errorf("failed to marshal subscription: %w", err)
+	// Create DynamoDB item manually to ensure correct field names
+	log.Printf("🔄 [%s] Creating DynamoDB item manually...", requestID)
+
+	// Debug: Log the subscription object before creating item
+	log.Printf("🔍 [%s] Pre-item creation subscription object:", requestID)
+	log.Printf("   UserID: '%s' (empty: %t)", sub.UserID, sub.UserID == "")
+	log.Printf("   Tier: '%s'", sub.Tier)
+	log.Printf("   Status: '%s'", sub.Status)
+
+	// Create the DynamoDB item manually with correct field names
+	item := map[string]types.AttributeValue{
+		"user_id":                   &types.AttributeValueMemberS{Value: sub.UserID},
+		"tier":                      &types.AttributeValueMemberS{Value: sub.Tier},
+		"status":                    &types.AttributeValueMemberS{Value: sub.Status},
+		"variant_id":                &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", sub.VariantID)},
+		"sub_id":                    &types.AttributeValueMemberS{Value: sub.SubID},
+		"created_at":                &types.AttributeValueMemberS{Value: sub.CreatedAt.Format(time.RFC3339)},
+		"updated_at":                &types.AttributeValueMemberS{Value: sub.UpdatedAt.Format(time.RFC3339)},
+		"customer_id":               &types.AttributeValueMemberS{Value: sub.CustomerID},
+		"email":                     &types.AttributeValueMemberS{Value: sub.Email},
+		"customer_portal_url":       &types.AttributeValueMemberS{Value: sub.CustomerPortalURL},
+		"update_payment_method_url": &types.AttributeValueMemberS{Value: sub.UpdatePaymentMethodURL},
+		"customer_portal_update_subscription_url": &types.AttributeValueMemberS{Value: sub.CustomerPortalUpdateSubscriptionURL},
 	}
 
-	// Log the marshaled data for debugging
-	log.Printf("🔍 [%s] Marshaled item contains %d attributes", requestID, len(item))
+	// Add optional ExpiresAt field if present
+	if sub.ExpiresAt != nil {
+		item["expires_at"] = &types.AttributeValueMemberS{Value: sub.ExpiresAt.Format(time.RFC3339)}
+	}
+
+	// Log the created item for debugging
+	log.Printf("🔍 [%s] Created DynamoDB item with %d attributes", requestID, len(item))
+
+	// Debug: Check if user_id is in the created item
+	if userIDAttr, exists := item["user_id"]; exists {
+		log.Printf("✅ [%s] DynamoDB item contains user_id: %+v", requestID, userIDAttr)
+	} else {
+		log.Printf("❌ [%s] CRITICAL: DynamoDB item is missing user_id field!", requestID)
+		log.Printf("❌ [%s] All DynamoDB item fields: %+v", requestID, item)
+	}
 
 	// Prepare the put item input
 	input := &dynamodb.PutItemInput{
@@ -290,7 +322,7 @@ func SaveSubscriptionDetailed(ctx context.Context, sub Subscription) error {
 	}
 
 	log.Printf("💾 [%s] Executing DynamoDB PutItem operation with detailed data...", requestID)
-	_, err = client.PutItem(ctx, input)
+	_, err := client.PutItem(ctx, input)
 	if err != nil {
 		log.Printf("❌ [%s] DynamoDB PutItem failed for detailed save: %v", requestID, err)
 		return fmt.Errorf("failed to save subscription: %w", err)

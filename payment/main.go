@@ -143,6 +143,12 @@ func setupRoutes(r *gin.Engine) {
 		api.GET("/subscription", handlers.GetSubscriptionDetailsHandler)
 		log.Println("  ✅ GET /api/subscription - Get subscription details")
 
+		api.GET("/subscription/status/:user_id", handlers.GetSubscriptionStatusHandler)
+		log.Println("  ✅ GET /api/subscription/status/:user_id - Get subscription status for user")
+
+		api.GET("/subscription/management/:user_id", handlers.GetUserManagementURLHandler)
+		log.Println("  ✅ GET /api/subscription/management/:user_id - Get subscription management URL")
+
 		api.GET("/subscription/urls", handlers.GetSubscriptionURLsHandler)
 		log.Println("  ✅ GET /api/subscription/urls - Get subscription management URLs")
 

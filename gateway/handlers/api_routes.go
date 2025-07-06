@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"gateway/middleware"
+	"gateway/pkg/redis"
 )
 
 // API version constant - can be changed for future versions
@@ -17,6 +19,48 @@ func SetupAPIRoutes(mux *http.ServeMux) {
 	SetupProfileRoutesWithAuth(mux, APIVersion)
 	SetupChatRoutesWithAuth(mux, APIVersion)
 	SetupMessageRoutesWithAuth(mux, APIVersion)
+
+	// Setup subscription routes
+	SetupSubscriptionRoutesWithAuth(mux, APIVersion)
+}
+
+// SetupSubscriptionRoutesWithAuth sets up subscription routes with Firebase authentication
+func SetupSubscriptionRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
+	// Get payment service URL from environment or use default
+	paymentServiceURL := os.Getenv("PAYMENT_SERVICE_URL")
+	if paymentServiceURL == "" {
+		paymentServiceURL = "http://localhost:8081" // Default payment service URL
+	}
+
+	// Create subscription handler
+	subscriptionHandler := NewSubscriptionHandler(redis.GetClient(), paymentServiceURL)
+
+	// Get user subscription information
+	mux.HandleFunc("/v1/profile/subscription", func(w http.ResponseWriter, r *http.Request) {
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				middleware.RequireUserResource(http.HandlerFunc(subscriptionHandler.GetUserSubscription)),
+			),
+		).ServeHTTP(w, r)
+	})
+
+	// Create checkout session
+	mux.HandleFunc("/v1/subscription/checkout", func(w http.ResponseWriter, r *http.Request) {
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				middleware.RequireUserResource(http.HandlerFunc(subscriptionHandler.CreateCheckoutSession)),
+			),
+		).ServeHTTP(w, r)
+	})
+
+	// Get subscription management URL
+	mux.HandleFunc("/v1/subscription/management", func(w http.ResponseWriter, r *http.Request) {
+		middleware.CORSMiddleware(
+			middleware.FirebaseAuthMiddleware(
+				middleware.RequireUserResource(http.HandlerFunc(subscriptionHandler.GetManagementURL)),
+			),
+		).ServeHTTP(w, r)
+	})
 }
 
 // SetupProfileRoutesWithAuth sets up profile routes with Firebase authentication
