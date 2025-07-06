@@ -317,3 +317,104 @@ func AuthorizeChatResource(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// RequireUserResource validates that the request is for the authenticated user's own resources
+// This middleware should be used for endpoints that operate on the current user's data
+func RequireUserResource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("user_authorization")
+
+		// Get authenticated user from context
+		user, ok := GetFirebaseUserFromContext(r.Context())
+		if !ok || user == nil {
+			log.Warn("No authenticated user found in context")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Authentication required", "status": 401}`))
+			return
+		}
+
+		// Add user ID to context for handlers to use
+		ctx := context.WithValue(r.Context(), "authenticated_user_id", user.UID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// GetAuthenticatedUserID retrieves the authenticated user ID from context
+func GetAuthenticatedUserID(ctx context.Context) (string, bool) {
+	userID, ok := ctx.Value("authenticated_user_id").(string)
+	return userID, ok
+}
+
+// RequireChatOwnership validates that the authenticated user owns the specified chat
+// This should be used for endpoints that operate on specific chats
+func RequireChatOwnership(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("chat_authorization")
+
+		// Get authenticated user from context
+		user, ok := GetFirebaseUserFromContext(r.Context())
+		if !ok || user == nil {
+			log.Warn("No authenticated user found in context")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Authentication required", "status": 401}`))
+			return
+		}
+
+		// Extract chat ID from URL path
+		path := r.URL.Path
+		var chatID string
+
+		if strings.Contains(path, "/by-chat-id/") {
+			// Extract from patterns like /v1/messages/by-chat-id/{chatId}
+			parts := strings.Split(path, "/by-chat-id/")
+			if len(parts) >= 2 {
+				chatPart := strings.Split(parts[1], "/")[0]
+				chatID = chatPart
+			}
+		} else if strings.Contains(path, "/chats/") && !strings.Contains(path, "/by-user-id/") {
+			// Extract from patterns like /v1/chats/{chatId}
+			parts := strings.Split(path, "/chats/")
+			if len(parts) >= 2 {
+				chatPart := strings.Split(parts[1], "/")[0]
+				if chatPart != "" && chatPart != "batch-operations" {
+					chatID = chatPart
+				}
+			}
+		}
+
+		// If we found a chat ID, validate the user owns this chat
+		if chatID != "" {
+			ctx := context.Background()
+			client := aws.GetDynamoDBClient(ctx)
+
+			chat, err := aws.GetChat(ctx, client, chatID)
+			if err != nil {
+				log.WarnWithFields("Chat not found", map[string]interface{}{
+					"chat_id": chatID,
+					"error":   err.Error(),
+				})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error": "Chat not found", "status": 404}`))
+				return
+			}
+
+			if chat.UserID != user.UID {
+				log.WarnWithFields("Chat authorization failed", map[string]interface{}{
+					"authenticated_uid": user.UID,
+					"chat_owner_uid":    chat.UserID,
+					"chat_id":           chatID,
+				})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error": "Chat not found", "status": 404}`))
+				return
+			}
+		}
+
+		// Continue to next handler
+		next.ServeHTTP(w, r)
+	})
+}

@@ -74,6 +74,13 @@ func BatchChatsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var chats []aws.Chat
 	if err := json.NewDecoder(r.Body).Decode(&chats); err != nil {
 		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
@@ -86,6 +93,8 @@ func BatchChatsHandler(w http.ResponseWriter, r *http.Request) {
 	// Create chats individually since we don't have a batch create function
 	var createdChats []*aws.Chat
 	for _, chat := range chats {
+		// Force the user ID to match the authenticated user
+		chat.UserID = user.UID
 		chat.CreatedAt = time.Now()
 		chat.UpdatedAt = time.Now()
 
@@ -109,6 +118,13 @@ func ChatOperationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
@@ -117,19 +133,56 @@ func ChatOperationsHandler(w http.ResponseWriter, r *http.Request) {
 		chat, err := aws.GetChat(ctx, client, chatID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error getting chat: %v", err)
-			sendAPIErrorResponse(w, "Failed to get chat", http.StatusInternalServerError)
+			// Return 404 for not found to avoid revealing chat existence
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
 			return
 		}
+
+		// Verify user owns this chat
+		if chat.UserID != user.UID {
+			log := logger.GetLogger("chat_authorization")
+			log.WarnWithFields("Unauthorized chat access attempt", map[string]interface{}{
+				"authenticated_uid": user.UID,
+				"chat_owner_uid":    chat.UserID,
+				"chat_id":           chatID,
+			})
+			// Return 404 instead of 403 to avoid revealing chat existence
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
 		sendJSONResponse(w, chat, http.StatusOK)
 
 	case http.MethodPut:
+		// First check if chat exists and user owns it
+		existingChat, err := aws.GetChat(ctx, client, chatID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting chat for update: %v", err)
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this chat
+		if existingChat.UserID != user.UID {
+			log := logger.GetLogger("chat_authorization")
+			log.WarnWithFields("Unauthorized chat update attempt", map[string]interface{}{
+				"authenticated_uid": user.UID,
+				"chat_owner_uid":    existingChat.UserID,
+				"chat_id":           chatID,
+			})
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
 		var chat aws.Chat
 		if err := json.NewDecoder(r.Body).Decode(&chat); err != nil {
 			sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		chat.ID = chatID // Ensure the ID matches the URL
+		// Ensure the user can't change ownership
+		chat.ID = chatID
+		chat.UserID = user.UID // Force the user ID to match authenticated user
 		chat.UpdatedAt = time.Now()
 
 		updatedChat, err := aws.UpdateChat(ctx, client, chat)
@@ -141,7 +194,27 @@ func ChatOperationsHandler(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, updatedChat, http.StatusOK)
 
 	case http.MethodDelete:
-		err := aws.DeleteChat(ctx, client, chatID)
+		// First check if chat exists and user owns it
+		existingChat, err := aws.GetChat(ctx, client, chatID)
+		if err != nil {
+			logger.GetDailyLogger().Error("Error getting chat for deletion: %v", err)
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
+		// Verify user owns this chat
+		if existingChat.UserID != user.UID {
+			log := logger.GetLogger("chat_authorization")
+			log.WarnWithFields("Unauthorized chat deletion attempt", map[string]interface{}{
+				"authenticated_uid": user.UID,
+				"chat_owner_uid":    existingChat.UserID,
+				"chat_id":           chatID,
+			})
+			sendAPIErrorResponse(w, "Chat not found", http.StatusNotFound)
+			return
+		}
+
+		err = aws.DeleteChat(ctx, client, chatID)
 		if err != nil {
 			logger.GetDailyLogger().Error("Error deleting chat: %v", err)
 			sendAPIErrorResponse(w, "Failed to delete chat", http.StatusInternalServerError)
@@ -161,6 +234,13 @@ func CreateChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get authenticated user from context
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	var chat aws.Chat
 	if err := json.NewDecoder(r.Body).Decode(&chat); err != nil {
 		sendAPIErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
@@ -170,6 +250,8 @@ func CreateChatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
+	// Force the user ID to match the authenticated user
+	chat.UserID = user.UID
 	chat.CreatedAt = time.Now()
 	chat.UpdatedAt = time.Now()
 
@@ -181,4 +263,31 @@ func CreateChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSONResponse(w, createdChat, http.StatusCreated)
+}
+
+// handleCurrentUserChats handles GET /v1/chats/current
+func handleCurrentUserChats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		sendAPIErrorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get authenticated user ID from context
+	userID, ok := middleware.GetAuthenticatedUserID(r.Context())
+	if !ok {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := context.Background()
+	client := aws.GetDynamoDBClient(ctx)
+
+	chats, err := aws.GetChatsByUserID(ctx, client, userID)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting chats by user ID: %v", err)
+		sendAPIErrorResponse(w, "Failed to get chats", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSONResponse(w, chats, http.StatusOK)
 }
