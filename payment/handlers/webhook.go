@@ -145,6 +145,17 @@ func processWebhookEvent(payload lsz.WebhookPayload, requestID string) error {
 
 	// Create subscription object
 	log.Printf("🏗️ [%s] Creating subscription object for user %s", requestID, userID)
+
+	// Debug: Log all the values being used to create the subscription
+	log.Printf("🔍 [%s] Subscription creation data:", requestID)
+	log.Printf("   UserID: '%s' (length: %d)", userID, len(userID))
+	log.Printf("   Tier: '%s'", tier)
+	log.Printf("   VariantID: %d", payload.Data.Attributes.VariantID)
+	log.Printf("   Status: '%s'", payload.Data.Attributes.Status)
+	log.Printf("   SubID: '%s'", payload.Data.ID)
+	log.Printf("   CustomerID: %d", payload.Data.Attributes.CustomerID)
+	log.Printf("   Email: '%s'", payload.Data.Attributes.UserEmail)
+
 	subscription := dynamo.Subscription{
 		UserID:                              userID,
 		Tier:                                tier,
@@ -159,6 +170,12 @@ func processWebhookEvent(payload lsz.WebhookPayload, requestID string) error {
 		UpdatePaymentMethodURL:              payload.Data.Attributes.URLs.UpdatePaymentMethod,
 		CustomerPortalUpdateSubscriptionURL: payload.Data.Attributes.URLs.CustomerPortalUpdateSubscription,
 	}
+
+	// Debug: Verify the subscription object was created correctly
+	log.Printf("🔍 [%s] Created subscription object verification:", requestID)
+	log.Printf("   subscription.UserID: '%s' (length: %d)", subscription.UserID, len(subscription.UserID))
+	log.Printf("   subscription.Tier: '%s'", subscription.Tier)
+	log.Printf("   subscription.Status: '%s'", subscription.Status)
 
 	log.Printf("🏗️ [%s] Subscription object created:", requestID)
 	log.Printf("   UserID: %s", userID)
