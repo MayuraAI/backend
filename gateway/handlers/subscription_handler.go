@@ -24,7 +24,7 @@ type SubscriptionHandler struct {
 // UserSubscriptionResponse represents the subscription status response
 type UserSubscriptionResponse struct {
 	UserID         string                  `json:"user_id"`
-	SubscriptionID *string                 `json:"subscription_id,omitempty"`
+	SubscriptionID *string                 `json:"sub_id,omitempty"`
 	Tier           config.SubscriptionTier `json:"tier"`
 	Status         string                  `json:"status"`
 	ExpiresAt      *time.Time              `json:"expires_at,omitempty"`
@@ -103,7 +103,7 @@ func (h *SubscriptionHandler) getSubscriptionFromPaymentService(userID string) (
 
 	var paymentResponse struct {
 		UserID         string     `json:"user_id"`
-		SubscriptionID *string    `json:"subscription_id"`
+		SubscriptionID *string    `json:"sub_id"`
 		Tier           string     `json:"tier"`
 		Status         string     `json:"status"`
 		ExpiresAt      *time.Time `json:"expires_at"`
@@ -333,7 +333,15 @@ func (h *SubscriptionHandler) GetManagementURL(w http.ResponseWriter, r *http.Re
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		sendAPIErrorResponse(w, "Active subscription not found", http.StatusNotFound)
+		// Try to get the specific error message from the payment service
+		var errorResponse struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errorResponse); err == nil && errorResponse.Error != "" {
+			sendAPIErrorResponse(w, errorResponse.Error, http.StatusNotFound)
+		} else {
+			sendAPIErrorResponse(w, "Active subscription not found", http.StatusNotFound)
+		}
 		return
 	}
 

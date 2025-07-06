@@ -110,22 +110,6 @@ func GetSubscription(ctx context.Context, userID string) (*Subscription, error) 
 	log.Printf("🔍 [%s] Getting subscription for user: %s", requestID, userID)
 	log.Printf("🔍 [%s] Table: %s", requestID, TableName)
 
-	// Handle development mode
-	if client == nil {
-		log.Printf("🔧 [%s] Development mode - returning mock subscription", requestID)
-		return &Subscription{
-			UserID:     userID,
-			Tier:       "plus",
-			Status:     "active",
-			VariantID:  887309,
-			SubID:      "dev-sub-123",
-			CreatedAt:  time.Now().Add(-24 * time.Hour),
-			UpdatedAt:  time.Now(),
-			CustomerID: "dev-customer-123",
-			Email:      "dev@example.com",
-		}, nil
-	}
-
 	// Prepare the query
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(TableName),
@@ -141,6 +125,8 @@ func GetSubscription(ctx context.Context, userID string) (*Subscription, error) 
 		return nil, fmt.Errorf("failed to get subscription: %w", err)
 	}
 
+	log.Printf("🔍 [%s] Result: %+v", requestID, result)
+
 	// Check if item exists
 	if result.Item == nil {
 		log.Printf("📋 [%s] No subscription found for user: %s", requestID, userID)
@@ -152,7 +138,9 @@ func GetSubscription(ctx context.Context, userID string) (*Subscription, error) 
 	// Unmarshal the result
 	log.Printf("🔄 [%s] Unmarshaling subscription data...", requestID)
 	var subscription Subscription
-	err = attributevalue.UnmarshalMap(result.Item, &subscription)
+	err = attributevalue.UnmarshalMapWithOptions(result.Item, &subscription, func(o *attributevalue.DecoderOptions) {
+		o.TagKey = "dynamodb"
+	})
 	if err != nil {
 		log.Printf("❌ [%s] Failed to unmarshal subscription: %v", requestID, err)
 		return nil, fmt.Errorf("failed to unmarshal subscription: %w", err)
@@ -164,6 +152,7 @@ func GetSubscription(ctx context.Context, userID string) (*Subscription, error) 
 	log.Printf("   Tier: %s", subscription.Tier)
 	log.Printf("   Status: %s", subscription.Status)
 	log.Printf("   Variant ID: %d", subscription.VariantID)
+	log.Printf("   SubID: %s", subscription.SubID)
 	log.Printf("   Created: %s", subscription.CreatedAt.Format(time.RFC3339))
 	log.Printf("   Updated: %s", subscription.UpdatedAt.Format(time.RFC3339))
 	if subscription.ExpiresAt != nil {
@@ -428,7 +417,9 @@ func ListSubscriptions(ctx context.Context, limit int32) ([]Subscription, error)
 	var subscriptions []Subscription
 	for i, item := range result.Items {
 		var sub Subscription
-		err = attributevalue.UnmarshalMap(item, &sub)
+		err = attributevalue.UnmarshalMapWithOptions(item, &sub, func(o *attributevalue.DecoderOptions) {
+			o.TagKey = "dynamodb"
+		})
 		if err != nil {
 			log.Printf("❌ [%s] Failed to unmarshal subscription %d: %v", requestID, i, err)
 			continue

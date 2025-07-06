@@ -9,13 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/google/uuid"
 )
 
 // CreateSubscription creates a new subscription
 func CreateSubscription(ctx context.Context, client *dynamodb.Client, subscription Subscription) (*Subscription, error) {
-	if subscription.ID == "" {
-		subscription.ID = uuid.New().String()
+	if subscription.UserID == "" {
+		return nil, fmt.Errorf("user_id is required")
 	}
 
 	now := time.Now()
@@ -30,7 +29,7 @@ func CreateSubscription(ctx context.Context, client *dynamodb.Client, subscripti
 	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:           aws.String(SubscriptionsTableName),
 		Item:                av,
-		ConditionExpression: aws.String("attribute_not_exists(id)"),
+		ConditionExpression: aws.String("attribute_not_exists(user_id)"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create subscription: %w", err)
@@ -39,12 +38,12 @@ func CreateSubscription(ctx context.Context, client *dynamodb.Client, subscripti
 	return &subscription, nil
 }
 
-// GetSubscription retrieves a subscription by ID
-func GetSubscription(ctx context.Context, client *dynamodb.Client, id string) (*Subscription, error) {
+// GetSubscription retrieves a subscription by user_id
+func GetSubscription(ctx context.Context, client *dynamodb.Client, userID string) (*Subscription, error) {
 	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(SubscriptionsTableName),
 		Key: map[string]types.AttributeValue{
-			"id": &types.AttributeValueMemberS{Value: id},
+			"user_id": &types.AttributeValueMemberS{Value: userID},
 		},
 	})
 	if err != nil {
@@ -64,35 +63,17 @@ func GetSubscription(ctx context.Context, client *dynamodb.Client, id string) (*
 	return &subscription, nil
 }
 
-// GetSubscriptionByUserID retrieves a subscription by user_id using GSI
+// GetSubscriptionByUserID is an alias for GetSubscription for backward compatibility
 func GetSubscriptionByUserID(ctx context.Context, client *dynamodb.Client, userID string) (*Subscription, error) {
-	result, err := client.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(SubscriptionsTableName),
-		IndexName:              aws.String(SubscriptionsUserIDGSI),
-		KeyConditionExpression: aws.String("user_id = :user_id"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":user_id": &types.AttributeValueMemberS{Value: userID},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to query subscription by user_id: %w", err)
-	}
-
-	if len(result.Items) == 0 {
-		return nil, fmt.Errorf("subscription not found for user_id: %s", userID)
-	}
-
-	var subscription Subscription
-	err = attributevalue.UnmarshalMap(result.Items[0], &subscription)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal subscription: %w", err)
-	}
-
-	return &subscription, nil
+	return GetSubscription(ctx, client, userID)
 }
 
 // UpdateSubscription updates an existing subscription
 func UpdateSubscription(ctx context.Context, client *dynamodb.Client, subscription Subscription) (*Subscription, error) {
+	if subscription.UserID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+
 	subscription.UpdatedAt = time.Now()
 
 	av, err := attributevalue.MarshalMap(subscription)
@@ -103,7 +84,7 @@ func UpdateSubscription(ctx context.Context, client *dynamodb.Client, subscripti
 	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:           aws.String(SubscriptionsTableName),
 		Item:                av,
-		ConditionExpression: aws.String("attribute_exists(id)"),
+		ConditionExpression: aws.String("attribute_exists(user_id)"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update subscription: %w", err)
@@ -112,12 +93,12 @@ func UpdateSubscription(ctx context.Context, client *dynamodb.Client, subscripti
 	return &subscription, nil
 }
 
-// DeleteSubscription deletes a subscription by ID
-func DeleteSubscription(ctx context.Context, client *dynamodb.Client, id string) error {
+// DeleteSubscription deletes a subscription by user_id
+func DeleteSubscription(ctx context.Context, client *dynamodb.Client, userID string) error {
 	_, err := client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 		TableName: aws.String(SubscriptionsTableName),
 		Key: map[string]types.AttributeValue{
-			"id": &types.AttributeValueMemberS{Value: id},
+			"user_id": &types.AttributeValueMemberS{Value: userID},
 		},
 	})
 	if err != nil {
