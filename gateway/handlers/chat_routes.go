@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gateway/aws"
+	"gateway/middleware"
 	"gateway/pkg/logger"
 )
 
@@ -45,16 +46,18 @@ func ChatsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := extractPathParam(r.URL.Path, fmt.Sprintf("/%s/chats/by-user-id/", APIVersion))
-	if userID == "" {
-		sendAPIErrorResponse(w, "User ID is required", http.StatusBadRequest)
+	// Get authenticated user from context instead of URL parameter
+	user, ok := middleware.GetFirebaseUserFromContext(r.Context())
+	if !ok || user == nil {
+		sendAPIErrorResponse(w, "Authentication required", http.StatusUnauthorized)
 		return
 	}
 
 	ctx := context.Background()
 	client := aws.GetDynamoDBClient(ctx)
 
-	chats, err := aws.GetChatsByUserID(ctx, client, userID)
+	// Use authenticated user's UID instead of URL parameter
+	chats, err := aws.GetChatsByUserID(ctx, client, user.UID)
 	if err != nil {
 		logger.GetDailyLogger().Error("Error getting chats by user ID: %v", err)
 		sendAPIErrorResponse(w, "Failed to get chats", http.StatusInternalServerError)

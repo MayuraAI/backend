@@ -21,27 +21,33 @@ func SetupAPIRoutes(mux *http.ServeMux) {
 
 // SetupProfileRoutesWithAuth sets up profile routes with Firebase authentication
 func SetupProfileRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
-	// Profile routes with CORS and Firebase authentication - using unique paths to avoid collisions
+	// Profile routes with CORS, Firebase authentication, and user authorization
 	mux.HandleFunc("/v1/profiles/by-user-id/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleProfileByUserID)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeUserResource(http.HandlerFunc(handleProfileByUserID)),
+			),
 		).ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/v1/profiles/users-batch/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleProfilesByUserID)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeUserResource(http.HandlerFunc(handleProfilesByUserID)),
+			),
 		).ServeHTTP(w, r)
 	})
-	// Username availability check endpoint
+	// Username availability check endpoint (no user authorization needed)
 	mux.HandleFunc("/v1/profiles/username-availability-check", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
 			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleUsernameCheckCombined)),
 		).ServeHTTP(w, r)
 	})
-	// Get username by user ID endpoint
+	// Get username by user ID endpoint with user authorization
 	mux.HandleFunc("/v1/profiles/get-username-by-user-id/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleGetUsernameByUserID)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeUserResource(http.HandlerFunc(handleGetUsernameByUserID)),
+			),
 		).ServeHTTP(w, r)
 	})
 	// Combined profile handler for both collection and individual operations
@@ -54,10 +60,12 @@ func SetupProfileRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
 
 // SetupChatRoutesWithAuth sets up chat routes with Firebase authentication
 func SetupChatRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
-	// Chat routes with CORS and Firebase authentication - using unique paths to avoid collisions
+	// Chat routes with CORS, Firebase authentication, and user authorization
 	mux.HandleFunc("/v1/chats/by-user-id/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(ChatsByUserIDHandler)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeUserResource(http.HandlerFunc(ChatsByUserIDHandler)),
+			),
 		).ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/v1/chats/batch-operations", func(w http.ResponseWriter, r *http.Request) {
@@ -65,20 +73,24 @@ func SetupChatRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
 			middleware.FirebaseAuthMiddleware(http.HandlerFunc(BatchChatsHandler)),
 		).ServeHTTP(w, r)
 	})
-	// Combined chat handler for both collection and individual operations
+	// Combined chat handler with chat authorization
 	mux.HandleFunc("/v1/chats/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleChatCombined)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeChatResource(http.HandlerFunc(handleChatCombined)),
+			),
 		).ServeHTTP(w, r)
 	})
 }
 
 // SetupMessageRoutesWithAuth sets up message routes with Firebase authentication
 func SetupMessageRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
-	// Message routes with CORS and Firebase authentication - using unique paths to avoid collisions
+	// Message routes with CORS, Firebase authentication, and chat authorization
 	mux.HandleFunc("/v1/messages/by-chat-id/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
-			middleware.FirebaseAuthMiddleware(http.HandlerFunc(MessageOperationsHandler)),
+			middleware.FirebaseAuthMiddleware(
+				middleware.AuthorizeChatResource(http.HandlerFunc(MessageOperationsHandler)),
+			),
 		).ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/v1/messages/batch-operations", func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +108,7 @@ func SetupMessageRoutesWithAuth(mux *http.ServeMux, apiVersion string) {
 			middleware.FirebaseAuthMiddleware(http.HandlerFunc(DeleteFromSequenceHandler)),
 		).ServeHTTP(w, r)
 	})
-	// Combined message handler for both collection and individual operations
+	// Combined message handler
 	mux.HandleFunc("/v1/messages/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.CORSMiddleware(
 			middleware.FirebaseAuthMiddleware(http.HandlerFunc(handleMessageCombined)),

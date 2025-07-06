@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"gateway/aws"
 	"gateway/pkg/logger"
 
 	firebase "firebase.google.com/go/v4"
@@ -187,4 +188,132 @@ func GetFirebaseTokenFromContext(ctx context.Context) (string, bool) {
 // IsAnonymousUser checks if the Firebase user is anonymous
 func IsAnonymousUser(user *auth.UserRecord) bool {
 	return user.Email == ""
+}
+
+// AuthorizeUserResource validates that the authenticated user can access the requested user resource
+func AuthorizeUserResource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("user_authorization")
+
+		// Get authenticated user from context
+		user, ok := GetFirebaseUserFromContext(r.Context())
+		if !ok || user == nil {
+			log.Warn("No authenticated user found in context")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Authentication required", "status": 401}`))
+			return
+		}
+
+		// Extract user ID from URL path
+		path := r.URL.Path
+		var requestedUserID string
+
+		// Handle different URL patterns
+		if strings.Contains(path, "/by-user-id/") {
+			// Extract from patterns like /v1/profiles/by-user-id/{userId} or /v1/chats/by-user-id/{userId}
+			parts := strings.Split(path, "/by-user-id/")
+			if len(parts) >= 2 {
+				userPart := strings.Split(parts[1], "/")[0]
+				requestedUserID = userPart
+			}
+		} else if strings.Contains(path, "/user/") {
+			// Extract from patterns like /v1/profiles/user/{userId}
+			parts := strings.Split(path, "/user/")
+			if len(parts) >= 2 {
+				userPart := strings.Split(parts[1], "/")[0]
+				requestedUserID = userPart
+			}
+		}
+
+		// If we found a user ID in the path, validate it matches the authenticated user
+		if requestedUserID != "" {
+			if user.UID != requestedUserID {
+				log.WarnWithFields("User authorization failed", map[string]interface{}{
+					"authenticated_uid": user.UID,
+					"requested_uid":     requestedUserID,
+					"path":              path,
+				})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"error": "Access denied: You can only access your own resources", "status": 403}`))
+				return
+			}
+		}
+
+		// Continue to next handler
+		next.ServeHTTP(w, r)
+	})
+}
+
+// AuthorizeChatResource validates that the authenticated user owns the requested chat
+func AuthorizeChatResource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := logger.GetLogger("chat_authorization")
+
+		// Get authenticated user from context
+		user, ok := GetFirebaseUserFromContext(r.Context())
+		if !ok || user == nil {
+			log.Warn("No authenticated user found in context")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "Authentication required", "status": 401}`))
+			return
+		}
+
+		// Extract chat ID from URL path
+		path := r.URL.Path
+		var chatID string
+
+		if strings.Contains(path, "/by-chat-id/") {
+			// Extract from patterns like /v1/messages/by-chat-id/{chatId}
+			parts := strings.Split(path, "/by-chat-id/")
+			if len(parts) >= 2 {
+				chatPart := strings.Split(parts[1], "/")[0]
+				chatID = chatPart
+			}
+		} else if strings.Contains(path, "/chats/") && !strings.Contains(path, "/by-user-id/") {
+			// Extract from patterns like /v1/chats/{chatId}
+			parts := strings.Split(path, "/chats/")
+			if len(parts) >= 2 {
+				chatPart := strings.Split(parts[1], "/")[0]
+				if chatPart != "" && chatPart != "batch-operations" {
+					chatID = chatPart
+				}
+			}
+		}
+
+		// If we found a chat ID, validate the user owns this chat
+		if chatID != "" {
+			ctx := context.Background()
+			client := aws.GetDynamoDBClient(ctx)
+
+			chat, err := aws.GetChat(ctx, client, chatID)
+			if err != nil {
+				log.WarnWithFields("Chat not found", map[string]interface{}{
+					"chat_id": chatID,
+					"error":   err.Error(),
+				})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"error": "Chat not found", "status": 404}`))
+				return
+			}
+
+			if chat.UserID != user.UID {
+				log.WarnWithFields("Chat authorization failed", map[string]interface{}{
+					"authenticated_uid": user.UID,
+					"chat_owner_uid":    chat.UserID,
+					"chat_id":           chatID,
+				})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"error": "Access denied: You can only access your own chats", "status": 403}`))
+				return
+			}
+		}
+
+		// Continue to next handler
+		next.ServeHTTP(w, r)
+	})
 }
