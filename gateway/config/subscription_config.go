@@ -74,25 +74,25 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 	},
 	Plus: RateLimitConfig{
 		FreeRequests:      -1,    // Unlimited free requests
-		MaxRequests:       50,    // 50 max requests per day
-		RequestsPerDay:    50,    // Total daily limit for max requests
+		MaxRequests:       100,   // 100 max requests per day
+		RequestsPerDay:    100,   // Total daily limit for max requests
 		DailyReset:        true,  // Reset daily at midnight
 		RequestsPerMinute: 10,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	Pro: RateLimitConfig{
 		FreeRequests:      -1,    // Unlimited free requests
-		MaxRequests:       100,   // 100 max requests per day
-		RequestsPerDay:    100,   // Total daily limit for max requests
+		MaxRequests:       500,   // 500 max requests per day
+		RequestsPerDay:    500,   // Total daily limit for max requests
 		DailyReset:        true,  // Reset daily at midnight
 		RequestsPerMinute: 20,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	SuspiciousActivity: SuspiciousActivityConfig{
-		Threshold:      15,   // Max requests in window before blocking
-		Window:         300,  // 5 minutes in seconds
-		BlockDuration:  3600, // 1 hour in seconds
-		TrackingWindow: 600,  // 10 minutes in seconds
+		Threshold:      6,     // Max requests in window before blocking
+		Window:         60,    // 1 minute in seconds
+		BlockDuration:  900,   // 15 minutes in seconds
+		TrackingWindow: 120,   // 2 minutes in seconds
 	},
 	Cleanup: CleanupConfig{
 		Interval: 86400,  // 24 hours in seconds
