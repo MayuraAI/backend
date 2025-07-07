@@ -123,8 +123,8 @@ var TierConfigs = map[string]TierConfig{
 	TierPlus: {
 		Name:               "Plus",
 		MonthlyTokenLimit:  100000,
-		PricePerMonth:      9.99,  // Dummy pricing
-		PricePerYear:       99.99, // Dummy pricing
+		PricePerMonth:      10,  // Dummy pricing
+		PricePerYear:       100, // Dummy pricing
 		CanSelectModel:     true,
 		CanAccessAPI:       false,
 		MaxChatsPerDay:     100,
@@ -134,8 +134,8 @@ var TierConfigs = map[string]TierConfig{
 	TierPro: {
 		Name:               "Pro",
 		MonthlyTokenLimit:  500000,
-		PricePerMonth:      29.99,  // Dummy pricing
-		PricePerYear:       299.99, // Dummy pricing
+		PricePerMonth:      15,  // Dummy pricing
+		PricePerYear:       150, // Dummy pricing
 		CanSelectModel:     true,
 		CanAccessAPI:       true,
 		MaxChatsPerDay:     -1, // unlimited
