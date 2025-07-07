@@ -47,7 +47,7 @@ server {
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     # Payment and subscription endpoints - route to payment service with unrestricted access
-    location ~ ^/api/(checkout|tier|subscription|cancel-subscription|webhook) {
+    location /api/webhook {
         # Allow all origins for subscription endpoints
         add_header 'Access-Control-Allow-Origin' '*' always;
         add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
@@ -77,28 +77,6 @@ server {
         proxy_connect_timeout       60s;
         proxy_send_timeout          60s;
         proxy_read_timeout          60s;
-    }
-
-    # Health check endpoint for payment service
-    location /health {
-        # Allow all origins for health check
-        add_header 'Access-Control-Allow-Origin' '*' always;
-        add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
-        add_header 'Access-Control-Allow-Headers' 'Content-Type' always;
-
-        # Handle OPTIONS requests for CORS preflight
-        if (\$request_method = 'OPTIONS') {
-            add_header 'Content-Length' '0' always;
-            add_header 'Content-Type' 'text/plain; charset=utf-8' always;
-            return 204;
-        }
-
-        # Proxy to payment service on port 8081
-        proxy_pass http://localhost:8081;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     # All other requests go to the gateway service
