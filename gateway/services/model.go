@@ -114,8 +114,8 @@ func createFallbackResponse(requestType middleware.RequestType) ModelResponse {
 	var primaryModel, primaryDisplayName string
 	var secondaryModel, secondaryDisplayName string
 
-	if requestType == middleware.ProRequest {
-		// For pro requests, use better models
+	if requestType == middleware.MaxRequest {
+		// For max requests, use better models
 		primaryModel = "claude-3-5-sonnet-20241022"
 		primaryDisplayName = "Claude 3.5 Sonnet"
 		secondaryModel = "gpt-4o"
@@ -265,8 +265,8 @@ func CallModelService(prompt string, requestType middleware.RequestType) (ModelR
 
 	// Convert RequestType to string
 	requestTypeStr := "free"
-	if requestType == middleware.ProRequest {
-		requestTypeStr = "pro"
+	if requestType == middleware.MaxRequest {
+		requestTypeStr = "max"
 	}
 
 	// Prepare the request

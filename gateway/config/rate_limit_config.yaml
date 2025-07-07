@@ -1,34 +1,38 @@
 anonymous:
   free_requests: 5        # 5 free requests total (lifetime)
-  pro_requests: 0         # 0 pro requests
-  requests_per_day: 5     # Total lifetime limit
-  daily_reset: false      # No daily reset for anonymous (lifetime limit)
-  requests_per_minute: 3  # Rate limit per minute
-  lifetime_limit: true    # This is a lifetime limit, not daily
+  max_requests: 0         # 0 max requests
+  requests_per_day: 5     # Total daily limit
+  lifetime_limit: true    # Anonymous users have lifetime limits
+  requests_per_minute: 1  # 1 request per minute
+  display_name: "Anonymous"
+  description: "5 free requests total (lifetime). Sign up to get 100 free requests per day!"
 
 free:
   free_requests: 100      # 100 free requests per day
-  pro_requests: 0         # 0 pro requests per day
+  max_requests: 0         # 0 max requests per day
   requests_per_day: 100   # Total daily limit for free requests
-  daily_reset: true       # Reset daily at midnight
-  requests_per_minute: 5  # Rate limit per minute
-  lifetime_limit: false   # Daily limit, not lifetime
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 5  # 5 requests per minute
+  display_name: "Free"
+  description: "100 free requests per day. Upgrade to get max requests!"
 
 plus:
   free_requests: -1       # Unlimited free requests
-  pro_requests: 50        # 50 pro requests per day
-  requests_per_day: 50    # Total daily limit for pro requests
-  daily_reset: true       # Reset daily at midnight
-  requests_per_minute: 10 # Rate limit per minute
-  lifetime_limit: false   # Daily limit, not lifetime
+  max_requests: 50        # 50 max requests per day
+  requests_per_day: 50    # Total daily limit for max requests
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 10 # 10 requests per minute
+  display_name: "Plus"
+  description: "50 max requests per day + unlimited free requests"
 
 pro:
   free_requests: -1       # Unlimited free requests
-  pro_requests: 100       # 100 pro requests per day
-  requests_per_day: 100   # Total daily limit for pro requests
-  daily_reset: true       # Reset daily at midnight
-  requests_per_minute: 15 # Rate limit per minute
-  lifetime_limit: false   # Daily limit, not lifetime
+  max_requests: 100       # 100 max requests per day
+  requests_per_day: 100   # Total daily limit for max requests
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 20 # 20 requests per minute
+  display_name: "Pro"
+  description: "100 max requests per day + unlimited free requests"
 
 # Global settings
 suspicious_activity:

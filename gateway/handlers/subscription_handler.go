@@ -35,7 +35,7 @@ type UserSubscriptionResponse struct {
 // UserUsageStats represents current usage statistics
 type UserUsageStats struct {
 	FreeRequestsUsed int       `json:"free_requests_used"`
-	ProRequestsUsed  int       `json:"pro_requests_used"`
+	MaxRequestsUsed  int       `json:"max_requests_used"`
 	LastReset        time.Time `json:"last_reset"`
 }
 
@@ -174,7 +174,7 @@ func (h *SubscriptionHandler) getUserUsageStats(userID string, tier config.Subsc
 
 	usage := &UserUsageStats{
 		FreeRequestsUsed: freeCount,
-		ProRequestsUsed:  proCount,
+		MaxRequestsUsed:  proCount,
 		LastReset:        resetTime,
 	}
 

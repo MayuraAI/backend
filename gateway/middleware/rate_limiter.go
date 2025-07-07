@@ -16,9 +16,9 @@ import (
 
 // DailyUsage represents daily usage tracking for a user/IP stored in Redis
 type DailyUsage struct {
-	// Free and Pro request counts
+	// Free and Max request counts
 	FreeRequestCount int `json:"free_request_count"` // Number of free requests made
-	ProRequestCount  int `json:"pro_request_count"`  // Number of pro requests made
+	MaxRequestCount  int `json:"max_request_count"`  // Number of max requests made
 
 	// Reset times
 	ResetTime time.Time `json:"reset_time"` // When the daily limit resets (midnight)
@@ -62,7 +62,7 @@ const (
 type RequestType string
 
 const (
-	ProRequest  RequestType = "pro"
+	MaxRequest  RequestType = "max"
 	FreeRequest RequestType = "free"
 )
 
@@ -82,7 +82,7 @@ func NewDailyUsage(tier config.SubscriptionTier, isAnonymous bool) *DailyUsage {
 
 	return &DailyUsage{
 		FreeRequestCount:   0,
-		ProRequestCount:    0,
+		MaxRequestCount:    0,
 		ResetTime:          nextMidnight,
 		MinuteRequestCount: 0,
 		MinuteResetTime:    nextMinute,
@@ -192,7 +192,7 @@ func CheckAndIncrementUsage(ctx context.Context, key string, tier config.Subscri
 	// Check if we need to reset daily counter (new day) - but not for lifetime limits
 	if !tierConfig.LifetimeLimit && tierConfig.DailyReset && now.After(usage.ResetTime) {
 		usage.FreeRequestCount = 0
-		usage.ProRequestCount = 0
+		usage.MaxRequestCount = 0
 		// Set reset time to next midnight
 		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 		usage.ResetTime = nextMidnight
@@ -217,7 +217,7 @@ func CheckAndIncrementUsage(ctx context.Context, key string, tier config.Subscri
 
 	// For anonymous users with lifetime limits, check if they've exceeded their total limit
 	if isAnonymous && tierConfig.LifetimeLimit {
-		totalRequests := usage.FreeRequestCount + usage.ProRequestCount
+		totalRequests := usage.FreeRequestCount + usage.MaxRequestCount
 		if totalRequests >= tierConfig.RequestsPerDay {
 			// Save current state to Redis
 			saveUsageToRedis(ctx, key, usage, config.GetDurationFromSeconds(cleanupConfig.TTL))
@@ -259,8 +259,8 @@ func CheckAndIncrementUsage(ctx context.Context, key string, tier config.Subscri
 	requestType := determineRequestType(usage, tierConfig)
 
 	// Increment appropriate counters
-	if requestType == ProRequest {
-		usage.ProRequestCount++
+	if requestType == MaxRequest {
+		usage.MaxRequestCount++
 	} else {
 		usage.FreeRequestCount++
 	}
@@ -282,9 +282,9 @@ func determineRequestType(usage *DailyUsage, tierConfig config.RateLimitConfig) 
 		return FreeRequest
 	}
 
-	// Check if user has pro requests available
-	if tierConfig.ProRequests > 0 && usage.ProRequestCount < tierConfig.ProRequests {
-		return ProRequest
+	// Check if user has max requests available
+	if tierConfig.MaxRequests > 0 && usage.MaxRequestCount < tierConfig.MaxRequests {
+		return MaxRequest
 	}
 
 	// Check if user has unlimited free requests
@@ -333,7 +333,7 @@ func GetUsageInfo(ctx context.Context, key string, tier config.SubscriptionTier,
 	}
 
 	freeCount := usage.FreeRequestCount
-	proCount := usage.ProRequestCount
+	maxCount := usage.MaxRequestCount
 	dailyReset := usage.ResetTime
 	minuteCount := usage.MinuteRequestCount
 	minuteReset := usage.MinuteResetTime
@@ -341,7 +341,7 @@ func GetUsageInfo(ctx context.Context, key string, tier config.SubscriptionTier,
 	// Check if we need to reset daily counter (new day) - but not for lifetime limits
 	if !tierConfig.LifetimeLimit && tierConfig.DailyReset && now.After(usage.ResetTime) {
 		freeCount = 0
-		proCount = 0
+		maxCount = 0
 		dailyReset = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 	}
 
@@ -351,7 +351,7 @@ func GetUsageInfo(ctx context.Context, key string, tier config.SubscriptionTier,
 		minuteReset = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
 	}
 
-	return freeCount, proCount, dailyReset, minuteCount, minuteReset, nil
+	return freeCount, maxCount, dailyReset, minuteCount, minuteReset, nil
 }
 
 // GetBlockingInfo returns current blocking status information from Redis
@@ -519,17 +519,17 @@ func RateLimitMiddleware(next http.Handler, legacyConfig RateLimitConfig) http.H
 		ctx = context.WithValue(ctx, RequestTypeContextKey, requestType)
 
 		// Get usage info for response headers
-		freeCount, proCount, resetTime, _, _, err := GetUsageInfo(ctx, key, tier, isAnonymous)
+		freeCount, maxCount, resetTime, _, _, err := GetUsageInfo(ctx, key, tier, isAnonymous)
 		if err == nil {
 			tierConfig, _ := config.GetRateLimitConfig(tier)
 
 			// Calculate remaining requests based on request type
 			var remaining int
-			if requestType == ProRequest {
-				remaining = max(0, tierConfig.ProRequests-proCount)
+			if requestType == MaxRequest {
+				remaining = max(0, tierConfig.MaxRequests-maxCount)
 			} else {
 				if config.IsUnlimited(tierConfig.FreeRequests) {
-					remaining = 999999 // Large number to indicate unlimited
+					remaining = -1 // Unlimited
 				} else {
 					remaining = max(0, tierConfig.FreeRequests-freeCount)
 				}
@@ -543,7 +543,7 @@ func RateLimitMiddleware(next http.Handler, legacyConfig RateLimitConfig) http.H
 
 			// Set usage headers
 			w.Header().Set("X-RateLimit-Used-Free", strconv.Itoa(freeCount))
-			w.Header().Set("X-RateLimit-Used-Pro", strconv.Itoa(proCount))
+			w.Header().Set("X-RateLimit-Used-Pro", strconv.Itoa(maxCount))
 		}
 
 		// Continue with the request
