@@ -23,8 +23,8 @@ const (
 // RateLimitConfig represents rate limiting configuration for a tier
 type RateLimitConfig struct {
 	FreeRequests      int  `json:"free_requests" yaml:"free_requests"`             // Free requests per day (-1 means unlimited)
-	ProRequests       int  `json:"pro_requests" yaml:"pro_requests"`               // Pro requests per day (-1 means unlimited)
-	RequestsPerDay    int  `json:"requests_per_day" yaml:"requests_per_day"`       // Total daily limit for pro requests
+	MaxRequests       int  `json:"max_requests" yaml:"max_requests"`               // Max requests per day (-1 means unlimited)
+	RequestsPerDay    int  `json:"requests_per_day" yaml:"requests_per_day"`       // Total daily limit for max requests
 	DailyReset        bool `json:"daily_reset" yaml:"daily_reset"`                 // Whether to reset daily
 	RequestsPerMinute int  `json:"requests_per_minute" yaml:"requests_per_minute"` // Per-minute rate limit
 	LifetimeLimit     bool `json:"lifetime_limit" yaml:"lifetime_limit"`           // Whether this is a lifetime limit (for anonymous)
@@ -58,15 +58,15 @@ type SubscriptionConfig struct {
 var defaultSubscriptionConfig = SubscriptionConfig{
 	Anonymous: RateLimitConfig{
 		FreeRequests:      5,     // 5 free requests total (lifetime)
-		ProRequests:       0,     // 0 pro requests
-		RequestsPerDay:    5,     // Total lifetime limit
+		MaxRequests:       0,     // 0 max requests
+		RequestsPerDay:    5,     // Total daily limit
 		DailyReset:        false, // No daily reset for anonymous (lifetime limit)
-		RequestsPerMinute: 3,     // Rate limit per minute
-		LifetimeLimit:     true,  // This is a lifetime limit, not daily
+		RequestsPerMinute: 1,     // Rate limit per minute
+		LifetimeLimit:     true,  // Anonymous users have lifetime limits
 	},
 	Free: RateLimitConfig{
 		FreeRequests:      100,   // 100 free requests per day
-		ProRequests:       0,     // 0 pro requests per day
+		MaxRequests:       0,     // 0 max requests per day
 		RequestsPerDay:    100,   // Total daily limit for free requests
 		DailyReset:        true,  // Reset daily at midnight
 		RequestsPerMinute: 5,     // Rate limit per minute
@@ -74,18 +74,18 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 	},
 	Plus: RateLimitConfig{
 		FreeRequests:      -1,    // Unlimited free requests
-		ProRequests:       50,    // 50 pro requests per day
-		RequestsPerDay:    50,    // Total daily limit for pro requests
+		MaxRequests:       50,    // 50 max requests per day
+		RequestsPerDay:    50,    // Total daily limit for max requests
 		DailyReset:        true,  // Reset daily at midnight
 		RequestsPerMinute: 10,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	Pro: RateLimitConfig{
 		FreeRequests:      -1,    // Unlimited free requests
-		ProRequests:       100,   // 100 pro requests per day
-		RequestsPerDay:    100,   // Total daily limit for pro requests
+		MaxRequests:       100,   // 100 max requests per day
+		RequestsPerDay:    100,   // Total daily limit for max requests
 		DailyReset:        true,  // Reset daily at midnight
-		RequestsPerMinute: 15,    // Rate limit per minute
+		RequestsPerMinute: 20,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	SuspiciousActivity: SuspiciousActivityConfig{

@@ -425,26 +425,26 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 				message = "Anonymous users should have lifetime limits - configuration error"
 			}
 		} else {
-			// Authenticated users - check pro requests first
-			if tierConfig.ProRequests > 0 && proCount < tierConfig.ProRequests {
-				// Still have pro requests
-				currentMode = middleware.ProRequest
+			// Authenticated users - check max requests first
+			if tierConfig.MaxRequests > 0 && proCount < tierConfig.MaxRequests {
+				// Still have max requests
+				currentMode = middleware.MaxRequest
 				totalUsed = proCount
-				totalRemaining = tierConfig.ProRequests - proCount
+				totalRemaining = tierConfig.MaxRequests - proCount
 
 				if totalRemaining == 1 {
-					message = "You have 1 pro request remaining today"
+					message = "You have 1 max request remaining today"
 				} else {
-					message = fmt.Sprintf("You have %d pro requests remaining today", totalRemaining)
+					message = fmt.Sprintf("You have %d max requests remaining today", totalRemaining)
 				}
 			} else {
-				// Pro requests exhausted, check free requests
+				// Max requests exhausted, check free requests
 				currentMode = middleware.FreeRequest
 
 				if config.IsUnlimited(tierConfig.FreeRequests) {
 					totalUsed = freeCount
 					totalRemaining = 999999 // Large number to indicate unlimited
-					message = "You've used all your pro requests for today. Continuing with unlimited free requests."
+					message = "You've used all your max requests for today. Continuing with unlimited free requests."
 				} else {
 					totalUsed = freeCount
 					totalRemaining = max(0, tierConfig.FreeRequests-freeCount)
