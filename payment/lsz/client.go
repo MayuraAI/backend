@@ -20,8 +20,8 @@ const (
 	BaseURL = "https://api.lemonsqueezy.com/v1"
 
 	// Variant IDs for subscription tiers
-	PlusVariantID = 887309 // Plus tier
-	ProVariantID  = 887311 // Pro tier
+	PlusVariantID = 890080 // Plus tier
+	ProVariantID  = 890081 // Pro tier
 )
 
 // GetTierVariantID returns the variant ID for a given tier
