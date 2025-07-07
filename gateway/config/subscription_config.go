@@ -61,7 +61,7 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 		MaxRequests:       0,     // 0 max requests
 		RequestsPerDay:    5,     // Total daily limit
 		DailyReset:        false, // No daily reset for anonymous (lifetime limit)
-		RequestsPerMinute: 1,     // Rate limit per minute
+		RequestsPerMinute: 5,     // Rate limit per minute
 		LifetimeLimit:     true,  // Anonymous users have lifetime limits
 	},
 	Free: RateLimitConfig{
@@ -69,7 +69,7 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 		MaxRequests:       0,     // 0 max requests per day
 		RequestsPerDay:    100,   // Total daily limit for free requests
 		DailyReset:        true,  // Reset daily at midnight
-		RequestsPerMinute: 5,     // Rate limit per minute
+		RequestsPerMinute: 10,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	Plus: RateLimitConfig{
@@ -77,7 +77,7 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 		MaxRequests:       100,   // 100 max requests per day
 		RequestsPerDay:    100,   // Total daily limit for max requests
 		DailyReset:        true,  // Reset daily at midnight
-		RequestsPerMinute: 10,    // Rate limit per minute
+		RequestsPerMinute: 15,    // Rate limit per minute
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	Pro: RateLimitConfig{
@@ -89,10 +89,10 @@ var defaultSubscriptionConfig = SubscriptionConfig{
 		LifetimeLimit:     false, // Daily limit, not lifetime
 	},
 	SuspiciousActivity: SuspiciousActivityConfig{
-		Threshold:      6,     // Max requests in window before blocking
-		Window:         60,    // 1 minute in seconds
-		BlockDuration:  900,   // 15 minutes in seconds
-		TrackingWindow: 120,   // 2 minutes in seconds
+		Threshold:      21,  // Max requests in window before blocking
+		Window:         60,  // 1 minute in seconds
+		BlockDuration:  900, // 15 minutes in seconds
+		TrackingWindow: 120, // 2 minutes in seconds
 	},
 	Cleanup: CleanupConfig{
 		Interval: 86400,  // 24 hours in seconds
