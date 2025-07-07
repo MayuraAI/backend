@@ -18,21 +18,21 @@ free:
 
 plus:
   free_requests: -1       # Unlimited free requests
-  max_requests: 50        # 50 max requests per day
-  requests_per_day: 50    # Total daily limit for max requests
+  max_requests: 100        # 100 max requests per day
+  requests_per_day: 100    # Total daily limit for max requests
   lifetime_limit: false   # Daily reset
   requests_per_minute: 10 # 10 requests per minute
   display_name: "Plus"
-  description: "50 max requests per day + unlimited free requests"
+  description: "100 max requests per day + unlimited free requests"
 
 pro:
   free_requests: -1       # Unlimited free requests
-  max_requests: 100       # 100 max requests per day
-  requests_per_day: 100   # Total daily limit for max requests
+  max_requests: 500       # 500 max requests per day
+  requests_per_day: 500   # Total daily limit for max requests
   lifetime_limit: false   # Daily reset
   requests_per_minute: 20 # 20 requests per minute
   display_name: "Pro"
-  description: "100 max requests per day + unlimited free requests"
+  description: "500 max requests per day + unlimited free requests"
 
 # Global settings
 suspicious_activity:
