@@ -1,0 +1,46 @@
+anonymous:
+  free_requests: 5        # 5 free requests total (lifetime)
+  max_requests: 0         # 0 max requests
+  requests_per_day: 5     # Total daily limit
+  lifetime_limit: true    # Anonymous users have lifetime limits
+  requests_per_minute: 5  # 5 request per minute
+  display_name: "Anonymous"
+  description: "5 free requests total (lifetime). Sign up to get 100 free requests per day!"
+
+free:
+  free_requests: 100      # 100 free requests per day
+  max_requests: 0         # 0 max requests per day
+  requests_per_day: 100   # Total daily limit for free requests
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 10  # 10 requests per minute
+  display_name: "Free"
+  description: "100 free requests per day. Upgrade to get max requests!"
+
+plus:
+  free_requests: -1       # Unlimited free requests
+  max_requests: 100        # 100 max requests per day
+  requests_per_day: 100    # Total daily limit for max requests
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 15 # 15 requests per minute
+  display_name: "Plus"
+  description: "100 max requests per day + unlimited free requests"
+
+pro:
+  free_requests: -1       # Unlimited free requests
+  max_requests: 500       # 500 max requests per day
+  requests_per_day: 500   # Total daily limit for max requests
+  lifetime_limit: false   # Daily reset
+  requests_per_minute: 20 # 20 requests per minute
+  display_name: "Pro"
+  description: "500 max requests per day + unlimited free requests"
+
+# Global settings
+suspicious_activity:
+  threshold: 21               # Max requests in window before blocking
+  window: 60                  # 1 minute in seconds
+  block_duration: 900         # 15 minutes in seconds
+  tracking_window: 120        # 2 minutes in seconds
+
+cleanup:
+  interval: 86400             # 24 hours in seconds
+  ttl: 172800                 # 48 hours in seconds 

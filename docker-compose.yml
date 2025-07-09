@@ -23,6 +23,8 @@ services:
     build:
       context: ./classifier
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     deploy:
       resources:
         limits:
@@ -52,6 +54,7 @@ services:
       - CLASSIFIER_URL=http://classifier:8000
       - GEMINI_API_BASE_URL=${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/models}
       - REDIS_URL=redis://redis:6379
+      - PAYMENT_SERVICE_URL=http://payment:8081
       - GOMAXPROCS=2
     deploy:
       resources:
@@ -66,6 +69,30 @@ services:
     restart: always
     depends_on:
       - redis
+
+  payment:
+    build:
+      context: ./payment
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    env_file:
+      - ./payment/.env
+    volumes:
+      - ./payment/firebase_env.json:/root/firebase_service_account.json:ro
+    environment:
+      - FIREBASE_SERVICE_ACCOUNT_PATH=/root/firebase_service_account.json
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - backend-network
+    restart: always
 
 volumes:
   redis_data:

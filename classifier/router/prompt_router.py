@@ -139,15 +139,15 @@ class PromptRouter:
         return quality_weight, cost_weight
 
     def _filter_models_by_tier(self, request_type: str) -> Dict[str, Dict[str, Any]]:
-        """Filter models based on request type (pro/free)."""
+        """Filter models based on request type (max/free)."""
         filtered_models = {}
         
         for model_name, model_data in self.model_scores.items():
             model_tier = model_data.get('tier', 'free')
             
-            if request_type == 'pro':
-                # Pro users get access to only pro models
-                if model_tier == 'pro':
+            if request_type == 'max':
+                # Max users get access to only max models
+                if model_tier == 'max':
                     filtered_models[model_name] = model_data
             elif request_type == 'free':
                 # Free users get access to only free models
@@ -358,6 +358,7 @@ class PromptRouter:
         else:
             # Use ML classification
             category_probs = await self.classifier.classify_prompt(prompt)
+            print(f"Category probabilities: {category_probs}")
             # log category probs
             for category, prob in category_probs.items():
                 DailyLogger().info(f"Category: {category}, Probability: {prob}")

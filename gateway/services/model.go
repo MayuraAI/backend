@@ -17,7 +17,7 @@ import (
 // ModelRequest represents the request to the model service
 type ModelRequest struct {
 	Prompt      string `json:"prompt"`
-	RequestType string `json:"request_type"` // "pro" or "free"
+	RequestType string `json:"request_type"` // "max" or "free"
 }
 
 // ModelResponse represents the response from the model service
@@ -106,7 +106,7 @@ func getClassifierURL() string {
 	if url := os.Getenv("CLASSIFIER_URL"); url != "" {
 		return url
 	}
-	return "http://localhost:8000" // Default for local development
+	return "http://classifier:8000" // Default for local development
 }
 
 // Circuit breaker methods
@@ -174,8 +174,8 @@ func CallModelService(prompt string, requestType middleware.RequestType) (ModelR
 
 	// Convert RequestType to string
 	requestTypeStr := "free"
-	if requestType == middleware.ProRequest {
-		requestTypeStr = "pro"
+	if requestType == middleware.MaxRequest {
+		requestTypeStr = "max"
 	}
 
 	// Prepare the request
