@@ -38,45 +38,21 @@ type Message struct {
 	SequenceNumber int       `json:"sequence_number" dynamodbav:"sequence_number"`
 }
 
-// Subscription represents the subscriptions table
+// Subscription represents the subscriptions table (matches payment service structure)
 type Subscription struct {
-	ID        string    `json:"id" dynamodbav:"id"`           // Primary key
-	UserID    string    `json:"user_id" dynamodbav:"user_id"` // GSI key
-	CreatedAt time.Time `json:"created_at" dynamodbav:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" dynamodbav:"updated_at"`
-
-	// Subscription Details
-	Tier         string `json:"tier" dynamodbav:"tier"`                   // "free", "plus", "pro"
-	Status       string `json:"status" dynamodbav:"status"`               // "active", "cancelled", "expired", "trial"
-	BillingCycle string `json:"billing_cycle" dynamodbav:"billing_cycle"` // "monthly", "yearly"
-
-	// Dates
-	StartDate    time.Time  `json:"start_date" dynamodbav:"start_date"`
-	EndDate      *time.Time `json:"end_date" dynamodbav:"end_date"`             // nil for active subscriptions
-	TrialEndDate *time.Time `json:"trial_end_date" dynamodbav:"trial_end_date"` // nil if no trial
-
-	// LemonSqueezy Integration
-	LemonSqueezyCustomerID     string `json:"lemonsqueezy_customer_id" dynamodbav:"lemonsqueezy_customer_id"`
-	LemonSqueezySubscriptionID string `json:"lemonsqueezy_subscription_id" dynamodbav:"lemonsqueezy_subscription_id"`
-	LemonSqueezyOrderID        string `json:"lemonsqueezy_order_id" dynamodbav:"lemonsqueezy_order_id"`
-	LemonSqueezyProductID      string `json:"lemonsqueezy_product_id" dynamodbav:"lemonsqueezy_product_id"`
-	LemonSqueezyVariantID      string `json:"lemonsqueezy_variant_id" dynamodbav:"lemonsqueezy_variant_id"`
-
-	// Pricing
-	PricePerMonth float64 `json:"price_per_month" dynamodbav:"price_per_month"`
-	Currency      string  `json:"currency" dynamodbav:"currency"` // "USD", "EUR", etc.
-
-	// Usage Limits (based on tier)
-	MonthlyTokenLimit int       `json:"monthly_token_limit" dynamodbav:"monthly_token_limit"`
-	MonthlyTokenUsed  int       `json:"monthly_token_used" dynamodbav:"monthly_token_used"`
-	ResetDate         time.Time `json:"reset_date" dynamodbav:"reset_date"` // When usage resets
-
-	// Features
-	CanSelectModel     bool `json:"can_select_model" dynamodbav:"can_select_model"`
-	CanAccessAPI       bool `json:"can_access_api" dynamodbav:"can_access_api"`
-	MaxChatsPerDay     int  `json:"max_chats_per_day" dynamodbav:"max_chats_per_day"`
-	MaxFilesPerChat    int  `json:"max_files_per_chat" dynamodbav:"max_files_per_chat"`
-	HasPrioritySupport bool `json:"has_priority_support" dynamodbav:"has_priority_support"`
+	UserID                              string     `json:"user_id" dynamodbav:"user_id"`
+	Tier                                string     `json:"tier" dynamodbav:"tier"`
+	Status                              string     `json:"status" dynamodbav:"status"`
+	VariantID                           int        `json:"variant_id" dynamodbav:"variant_id"`
+	SubID                               string     `json:"sub_id" dynamodbav:"sub_id"`
+	CreatedAt                           time.Time  `json:"created_at" dynamodbav:"created_at"`
+	UpdatedAt                           time.Time  `json:"updated_at" dynamodbav:"updated_at"`
+	ExpiresAt                           *time.Time `json:"expires_at,omitempty" dynamodbav:"expires_at,omitempty"`
+	CustomerID                          string     `json:"customer_id" dynamodbav:"customer_id"`
+	Email                               string     `json:"email" dynamodbav:"email"`
+	CustomerPortalURL                   string     `json:"customer_portal_url" dynamodbav:"customer_portal_url"`
+	UpdatePaymentMethodURL              string     `json:"update_payment_method_url" dynamodbav:"update_payment_method_url"`
+	CustomerPortalUpdateSubscriptionURL string     `json:"customer_portal_update_subscription_url" dynamodbav:"customer_portal_update_subscription_url"`
 }
 
 // Table names constants
@@ -94,9 +70,6 @@ const (
 	ChatsUserIDGSI         = "user_id-gsi"
 	MessagesChatIDGSI      = "chat_id-gsi"
 	MessagesUserIDGSI      = "user_id-gsi"
-	SubscriptionsUserIDGSI = "user_id-gsi"
-	SubscriptionsTierGSI   = "tier-gsi"   // For analytics
-	SubscriptionsStatusGSI = "status-gsi" // For admin queries
 )
 
 // Tier definitions
@@ -150,8 +123,8 @@ var TierConfigs = map[string]TierConfig{
 	TierPlus: {
 		Name:               "Plus",
 		MonthlyTokenLimit:  100000,
-		PricePerMonth:      9.99,  // Dummy pricing
-		PricePerYear:       99.99, // Dummy pricing
+		PricePerMonth:      10,  // Dummy pricing
+		PricePerYear:       100, // Dummy pricing
 		CanSelectModel:     true,
 		CanAccessAPI:       false,
 		MaxChatsPerDay:     100,
@@ -161,8 +134,8 @@ var TierConfigs = map[string]TierConfig{
 	TierPro: {
 		Name:               "Pro",
 		MonthlyTokenLimit:  500000,
-		PricePerMonth:      29.99,  // Dummy pricing
-		PricePerYear:       299.99, // Dummy pricing
+		PricePerMonth:      15,  // Dummy pricing
+		PricePerYear:       150, // Dummy pricing
 		CanSelectModel:     true,
 		CanAccessAPI:       true,
 		MaxChatsPerDay:     -1, // unlimited

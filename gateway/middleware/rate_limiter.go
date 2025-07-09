@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gateway/config"
 	"gateway/pkg/logger"
 	"gateway/pkg/redis"
 	"net/http"
@@ -15,8 +16,12 @@ import (
 
 // DailyUsage represents daily usage tracking for a user/IP stored in Redis
 type DailyUsage struct {
-	RequestCount int       `json:"request_count"` // Number of requests made today
-	ResetTime    time.Time `json:"reset_time"`    // When the daily limit resets (midnight)
+	// Free and Max request counts
+	FreeRequestCount int `json:"free_request_count"` // Number of free requests made
+	MaxRequestCount  int `json:"max_request_count"`  // Number of max requests made
+
+	// Reset times
+	ResetTime time.Time `json:"reset_time"` // When the daily limit resets (midnight)
 
 	// Per-minute rate limiting
 	MinuteRequestCount int       `json:"minute_request_count"` // Number of requests made in current minute
@@ -26,9 +31,13 @@ type DailyUsage struct {
 	RequestTimestamps []time.Time `json:"request_timestamps"` // Recent request timestamps for burst detection
 	BlockedUntil      time.Time   `json:"blocked_until"`      // When the user/IP is blocked until
 	IsBlocked         bool        `json:"is_blocked"`         // Whether the user/IP is currently blocked
+
+	// Tier information
+	UserTier    config.SubscriptionTier `json:"user_tier"`    // User's subscription tier
+	IsAnonymous bool                    `json:"is_anonymous"` // Whether user is anonymous
 }
 
-// RateLimitConfig holds rate limiting configuration
+// RateLimitConfig holds rate limiting configuration (legacy support)
 type RateLimitConfig struct {
 	RequestsPerDay    int           // Daily request limit
 	RequestsPerMinute int           // Per-minute request limit
@@ -42,37 +51,6 @@ type RateLimitConfig struct {
 	TrackingWindow      time.Duration // How long to keep request timestamps
 }
 
-// Default rate limiting configuration
-var defaultConfig = RateLimitConfig{
-	RequestsPerDay:    5,             // 5 requests per day per authenticated user
-	RequestsPerMinute: 3,              // 3 requests per minute per user
-	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
-	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
-
-	// Suspicious activity defaults
-	SuspiciousThreshold: 15,               // 15 requests in 5 minutes is suspicious
-	SuspiciousWindow:    5 * time.Minute,  // 5 minute window
-	BlockDuration:       60 * time.Minute, // Block for 1 hour
-	TrackingWindow:      10 * time.Minute, // Keep timestamps for 10 minutes
-}
-
-// Anonymous user rate limiting configuration
-var anonymousConfig = RateLimitConfig{
-	RequestsPerDay:    5,              // 0 requests per day for anonymous users
-	RequestsPerMinute: 5,              // 2 requests per minute for anonymous users
-	CleanupInterval:   24 * time.Hour, // Clean up every 24 hours
-	CleanupTTL:        48 * time.Hour, // Remove usage records older than 48 hours
-
-	// Suspicious activity defaults
-	SuspiciousThreshold: 10,               // 10 requests in 5 minutes is suspicious for anonymous
-	SuspiciousWindow:    5 * time.Minute,  // 5 minute window
-	BlockDuration:       60 * time.Minute, // Block for 1 hour
-	TrackingWindow:      10 * time.Minute, // Keep timestamps for 10 minutes
-}
-
-// Global rate limiter instance - no longer needed with Redis
-// var globalRateLimiter *RateLimiter
-
 // Context keys for request type
 type contextKey string
 
@@ -84,7 +62,7 @@ const (
 type RequestType string
 
 const (
-	ProRequest  RequestType = "pro"
+	MaxRequest  RequestType = "max"
 	FreeRequest RequestType = "free"
 )
 
@@ -94,45 +72,30 @@ const (
 	usageKeyPrefix  = "usage:"
 )
 
-// init initializes the global rate limiter - no longer needed
-// func init() {
-//	globalRateLimiter = NewRateLimiter(defaultConfig)
-// }
-
-// NewRateLimiter creates a new rate limiter with the given configuration - no longer needed with Redis
-// func NewRateLimiter(config RateLimitConfig) *RateLimiter {
-//	rl := &RateLimiter{
-//		usage:      make(map[string]*DailyUsage),
-//		cleanupTTL: config.CleanupTTL,
-//	}
-//
-//	// Start cleanup routine
-//	go rl.cleanupRoutine(config.CleanupInterval)
-//
-//	return rl
-// }
-
 // NewDailyUsage creates a new daily usage tracker
-func NewDailyUsage() *DailyUsage {
+func NewDailyUsage(tier config.SubscriptionTier, isAnonymous bool) *DailyUsage {
 	now := time.Now()
-	// Set reset time to next midnight
+	// Set reset time to next midnight (unless it's a lifetime limit)
 	nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 	// Set minute reset time to next minute
 	nextMinute := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
 
 	return &DailyUsage{
-		RequestCount:       0,
+		FreeRequestCount:   0,
+		MaxRequestCount:    0,
 		ResetTime:          nextMidnight,
 		MinuteRequestCount: 0,
 		MinuteResetTime:    nextMinute,
 		RequestTimestamps:  make([]time.Time, 0),
 		BlockedUntil:       time.Time{},
 		IsBlocked:          false,
+		UserTier:           tier,
+		IsAnonymous:        isAnonymous,
 	}
 }
 
 // getUsageFromRedis retrieves usage data from Redis
-func getUsageFromRedis(ctx context.Context, key string) (*DailyUsage, error) {
+func getUsageFromRedis(ctx context.Context, key string, tier config.SubscriptionTier, isAnonymous bool) (*DailyUsage, error) {
 	client := redis.GetClient()
 	if client == nil {
 		return nil, fmt.Errorf("redis client not initialized")
@@ -145,7 +108,7 @@ func getUsageFromRedis(ctx context.Context, key string) (*DailyUsage, error) {
 	if err != nil {
 		if err == redisv9.Nil {
 			// Key doesn't exist, return new usage
-			return NewDailyUsage(), nil
+			return NewDailyUsage(tier, isAnonymous), nil
 		}
 		return nil, fmt.Errorf("failed to get usage from redis: %w", err)
 	}
@@ -155,6 +118,10 @@ func getUsageFromRedis(ctx context.Context, key string) (*DailyUsage, error) {
 	if err := json.Unmarshal([]byte(data), &usage); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal usage data: %w", err)
 	}
+
+	// Update tier information in case it changed
+	usage.UserTier = tier
+	usage.IsAnonymous = isAnonymous
 
 	return &usage, nil
 }
@@ -184,9 +151,27 @@ func saveUsageToRedis(ctx context.Context, key string, usage *DailyUsage, ttl ti
 }
 
 // CheckAndIncrementUsage checks if a request should be considered pro or free and increments usage
-func CheckAndIncrementUsage(ctx context.Context, key string, dailyLimit int, config RateLimitConfig, isAnonymous bool) (RequestType, bool, error) {
+func CheckAndIncrementUsage(ctx context.Context, key string, tier config.SubscriptionTier, isAnonymous bool) (RequestType, bool, error) {
+	// Get tier configuration
+	tierConfig, err := config.GetRateLimitConfig(tier)
+	if err != nil {
+		return FreeRequest, false, fmt.Errorf("failed to get tier config: %w", err)
+	}
+
+	// Get suspicious activity configuration
+	suspiciousConfig, err := config.GetSuspiciousActivityConfig()
+	if err != nil {
+		return FreeRequest, false, fmt.Errorf("failed to get suspicious activity config: %w", err)
+	}
+
+	// Get cleanup configuration
+	cleanupConfig, err := config.GetCleanupConfig()
+	if err != nil {
+		return FreeRequest, false, fmt.Errorf("failed to get cleanup config: %w", err)
+	}
+
 	// Get current usage from Redis
-	usage, err := getUsageFromRedis(ctx, key)
+	usage, err := getUsageFromRedis(ctx, key, tier, isAnonymous)
 	if err != nil {
 		return FreeRequest, false, err
 	}
@@ -204,9 +189,10 @@ func CheckAndIncrementUsage(ctx context.Context, key string, dailyLimit int, con
 		usage.BlockedUntil = time.Time{}
 	}
 
-	// Check if we need to reset daily counter (new day)
-	if now.After(usage.ResetTime) {
-		usage.RequestCount = 0
+	// Check if we need to reset daily counter (new day) - but not for lifetime limits
+	if !tierConfig.LifetimeLimit && tierConfig.DailyReset && now.After(usage.ResetTime) {
+		usage.FreeRequestCount = 0
+		usage.MaxRequestCount = 0
 		// Set reset time to next midnight
 		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 		usage.ResetTime = nextMidnight
@@ -223,86 +209,106 @@ func CheckAndIncrementUsage(ctx context.Context, key string, dailyLimit int, con
 	}
 
 	// Check per-minute rate limit first
-	if usage.MinuteRequestCount >= config.RequestsPerMinute {
+	if usage.MinuteRequestCount >= tierConfig.RequestsPerMinute {
 		// Save current state to Redis
-		saveUsageToRedis(ctx, key, usage, config.CleanupTTL)
+		saveUsageToRedis(ctx, key, usage, config.GetDurationFromSeconds(cleanupConfig.TTL))
 		return FreeRequest, false, nil // Request is rate limited by per-minute limit
 	}
 
-	// For anonymous users, block entirely if they've exceeded their daily limit
-	if isAnonymous {
-		if usage.RequestCount >= dailyLimit {
+	// For anonymous users with lifetime limits, check if they've exceeded their total limit
+	if isAnonymous && tierConfig.LifetimeLimit {
+		totalRequests := usage.FreeRequestCount + usage.MaxRequestCount
+		if totalRequests >= tierConfig.RequestsPerDay {
 			// Save current state to Redis
-			saveUsageToRedis(ctx, key, usage, config.CleanupTTL)
-			return FreeRequest, false, nil
-		}
-
-		// Increment both daily and minute request counts for anonymous users
-		usage.RequestCount++
-		usage.MinuteRequestCount++
-
-		// Save updated usage to Redis
-		err = saveUsageToRedis(ctx, key, usage, config.CleanupTTL)
-		if err != nil {
-			return FreeRequest, false, err
-		}
-
-		return FreeRequest, true, nil
-	}
-
-	// Add current request timestamp for authenticated users
-	usage.RequestTimestamps = append(usage.RequestTimestamps, now)
-
-	// Clean up old timestamps (keep only those within tracking window)
-	cutoff := now.Add(-config.TrackingWindow)
-	filteredTimestamps := make([]time.Time, 0)
-	for _, ts := range usage.RequestTimestamps {
-		if ts.After(cutoff) {
-			filteredTimestamps = append(filteredTimestamps, ts)
+			saveUsageToRedis(ctx, key, usage, config.GetDurationFromSeconds(cleanupConfig.TTL))
+			return FreeRequest, false, nil // Request is blocked - lifetime limit exceeded
 		}
 	}
-	usage.RequestTimestamps = filteredTimestamps
 
-	// Check for suspicious activity (too many requests in short window)
-	if checkSuspiciousActivity(usage, now, config) {
-		usage.IsBlocked = true
-		usage.BlockedUntil = now.Add(config.BlockDuration)
+	// For non-anonymous users, check for suspicious activity
+	if !isAnonymous {
+		// Add current request timestamp
+		usage.RequestTimestamps = append(usage.RequestTimestamps, now)
 
-		// Save updated usage to Redis
-		err = saveUsageToRedis(ctx, key, usage, config.CleanupTTL)
-		if err != nil {
-			return FreeRequest, false, err
+		// Clean up old timestamps (keep only those within tracking window)
+		cutoff := now.Add(-config.GetDurationFromSeconds(suspiciousConfig.TrackingWindow))
+		filteredTimestamps := make([]time.Time, 0)
+		for _, ts := range usage.RequestTimestamps {
+			if ts.After(cutoff) {
+				filteredTimestamps = append(filteredTimestamps, ts)
+			}
 		}
+		usage.RequestTimestamps = filteredTimestamps
 
-		return FreeRequest, false, nil // Request is blocked due to suspicious activity
+		// Check for suspicious activity (too many requests in short window)
+		if checkSuspiciousActivity(usage, now, suspiciousConfig) {
+			usage.IsBlocked = true
+			usage.BlockedUntil = now.Add(config.GetDurationFromSeconds(suspiciousConfig.BlockDuration))
+
+			// Save updated usage to Redis
+			err = saveUsageToRedis(ctx, key, usage, config.GetDurationFromSeconds(cleanupConfig.TTL))
+			if err != nil {
+				return FreeRequest, false, err
+			}
+
+			return FreeRequest, false, nil // Request is blocked due to suspicious activity
+		}
 	}
 
-	// Increment both daily and minute request counts
-	usage.RequestCount++
+	// Determine request type based on tier and current usage
+	requestType := determineRequestType(usage, tierConfig)
+
+	// Increment appropriate counters
+	if requestType == MaxRequest {
+		usage.MaxRequestCount++
+	} else {
+		usage.FreeRequestCount++
+	}
 	usage.MinuteRequestCount++
 
 	// Save updated usage to Redis
-	err = saveUsageToRedis(ctx, key, usage, config.CleanupTTL)
+	err = saveUsageToRedis(ctx, key, usage, config.GetDurationFromSeconds(cleanupConfig.TTL))
 	if err != nil {
 		return FreeRequest, false, err
 	}
 
-	// Determine if this is a pro or free request based on daily limit
-	if usage.RequestCount <= dailyLimit {
-		return ProRequest, true, nil
+	return requestType, true, nil
+}
+
+// determineRequestType determines if a request should be pro or free based on tier and usage
+func determineRequestType(usage *DailyUsage, tierConfig config.RateLimitConfig) RequestType {
+	// Anonymous users always get free requests
+	if usage.IsAnonymous {
+		return FreeRequest
 	}
-	// For authenticated users, allow free requests after quota exhaustion
-	return FreeRequest, true, nil
+
+	// Check if user has max requests available
+	if tierConfig.MaxRequests > 0 && usage.MaxRequestCount < tierConfig.MaxRequests {
+		return MaxRequest
+	}
+
+	// Check if user has unlimited free requests
+	if config.IsUnlimited(tierConfig.FreeRequests) {
+		return FreeRequest
+	}
+
+	// Check if user has free requests available
+	if tierConfig.FreeRequests > 0 && usage.FreeRequestCount < tierConfig.FreeRequests {
+		return FreeRequest
+	}
+
+	// No requests available - this shouldn't happen if rate limiting is working correctly
+	return FreeRequest
 }
 
 // checkSuspiciousActivity checks if the current request pattern is suspicious
-func checkSuspiciousActivity(usage *DailyUsage, now time.Time, config RateLimitConfig) bool {
-	if config.SuspiciousThreshold <= 0 {
+func checkSuspiciousActivity(usage *DailyUsage, now time.Time, suspiciousConfig config.SuspiciousActivityConfig) bool {
+	if suspiciousConfig.Threshold <= 0 {
 		return false // Suspicious activity detection disabled
 	}
 
 	// Count requests within the suspicious window
-	cutoff := now.Add(-config.SuspiciousWindow)
+	cutoff := now.Add(-config.GetDurationFromSeconds(suspiciousConfig.Window))
 	count := 0
 	for _, ts := range usage.RequestTimestamps {
 		if ts.After(cutoff) {
@@ -310,26 +316,32 @@ func checkSuspiciousActivity(usage *DailyUsage, now time.Time, config RateLimitC
 		}
 	}
 
-	return count > config.SuspiciousThreshold
+	return count > suspiciousConfig.Threshold
 }
 
 // GetUsageInfo returns current usage information from Redis
-func GetUsageInfo(ctx context.Context, key string) (int, time.Time, int, time.Time, error) {
-	usage, err := getUsageFromRedis(ctx, key)
+func GetUsageInfo(ctx context.Context, key string, tier config.SubscriptionTier, isAnonymous bool) (int, int, time.Time, int, time.Time, error) {
+	usage, err := getUsageFromRedis(ctx, key, tier, isAnonymous)
 	if err != nil {
-		return 0, time.Time{}, 0, time.Time{}, err
+		return 0, 0, time.Time{}, 0, time.Time{}, err
 	}
 
 	now := time.Now()
+	tierConfig, err := config.GetRateLimitConfig(tier)
+	if err != nil {
+		return 0, 0, time.Time{}, 0, time.Time{}, err
+	}
 
-	dailyCount := usage.RequestCount
+	freeCount := usage.FreeRequestCount
+	maxCount := usage.MaxRequestCount
 	dailyReset := usage.ResetTime
 	minuteCount := usage.MinuteRequestCount
 	minuteReset := usage.MinuteResetTime
 
-	// Check if we need to reset daily counter (new day)
-	if now.After(usage.ResetTime) {
-		dailyCount = 0
+	// Check if we need to reset daily counter (new day) - but not for lifetime limits
+	if !tierConfig.LifetimeLimit && tierConfig.DailyReset && now.After(usage.ResetTime) {
+		freeCount = 0
+		maxCount = 0
 		dailyReset = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 	}
 
@@ -339,12 +351,12 @@ func GetUsageInfo(ctx context.Context, key string) (int, time.Time, int, time.Ti
 		minuteReset = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, now.Location())
 	}
 
-	return dailyCount, dailyReset, minuteCount, minuteReset, nil
+	return freeCount, maxCount, dailyReset, minuteCount, minuteReset, nil
 }
 
 // GetBlockingInfo returns current blocking status information from Redis
-func GetBlockingInfo(ctx context.Context, key string) (bool, time.Time, int, error) {
-	usage, err := getUsageFromRedis(ctx, key)
+func GetBlockingInfo(ctx context.Context, key string, tier config.SubscriptionTier, isAnonymous bool) (bool, time.Time, int, error) {
+	usage, err := getUsageFromRedis(ctx, key, tier, isAnonymous)
 	if err != nil {
 		return false, time.Time{}, 0, err
 	}
@@ -389,7 +401,8 @@ func GetUsageStats(ctx context.Context) (map[string]interface{}, error) {
 		// Remove prefix to get the actual key
 		actualKey := key[len(rateLimitPrefix+usageKeyPrefix):]
 
-		usage, err := getUsageFromRedis(ctx, actualKey)
+		// We need tier info to get usage, so we'll use a default tier for stats
+		usage, err := getUsageFromRedis(ctx, actualKey, config.TierFree, false)
 		if err != nil {
 			continue // Skip this key if we can't read it
 		}
@@ -408,16 +421,11 @@ func GetUsageStats(ctx context.Context) (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"active_users":         len(keys),
-		"blocked_users":        blockedUsers,
-		"recent_requests":      totalRecentRequests,
-		"cleanup_ttl":          defaultConfig.CleanupTTL.String(),
-		"requests_per_day":     defaultConfig.RequestsPerDay,
-		"requests_per_minute":  defaultConfig.RequestsPerMinute,
-		"suspicious_threshold": defaultConfig.SuspiciousThreshold,
-		"suspicious_window":    defaultConfig.SuspiciousWindow.String(),
-		"block_duration":       defaultConfig.BlockDuration.String(),
-		"storage_backend":      "redis",
+		"active_users":    len(keys),
+		"blocked_users":   blockedUsers,
+		"recent_requests": totalRecentRequests,
+		"storage_backend": "redis",
+		"config_source":   "tier_based",
 	}, nil
 }
 
@@ -426,6 +434,12 @@ func CleanupExpiredUsage(ctx context.Context) error {
 	client := redis.GetClient()
 	if client == nil {
 		return fmt.Errorf("redis client not initialized")
+	}
+
+	// Get cleanup configuration
+	cleanupConfig, err := config.GetCleanupConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get cleanup config: %w", err)
 	}
 
 	// Get all usage keys
@@ -447,7 +461,7 @@ func CleanupExpiredUsage(ctx context.Context) error {
 		// If TTL is -1 (no expiration) or expired, handle accordingly
 		if ttl == -1 {
 			// Set TTL for keys without expiration
-			client.Expire(ctx, key, defaultConfig.CleanupTTL)
+			client.Expire(ctx, key, config.GetDurationFromSeconds(cleanupConfig.TTL))
 		} else if ttl <= 0 {
 			// Key is expired, delete it
 			client.Del(ctx, key)
@@ -459,38 +473,24 @@ func CleanupExpiredUsage(ctx context.Context) error {
 	return nil
 }
 
-// RateLimitMiddleware creates a rate limiting middleware using Redis
-func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler {
+// RateLimitMiddleware creates a rate limiting middleware using Redis and tier-based configuration
+func RateLimitMiddleware(next http.Handler, legacyConfig RateLimitConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		// Create rate limit key based on user ID (from auth) or IP address
 		key := getRateLimitKey(r)
 
-		// Get user from context to determine if anonymous
-		user, userOk := GetFirebaseUserFromContext(ctx)
-		var isAnonymous bool
-		if userOk && user != nil {
-			isAnonymous = IsAnonymousUser(user)
-		} else {
-			isAnonymous = true // Default to anonymous if no user found
-		}
-
-		// Determine which config to use based on user type
-		var cfg RateLimitConfig
-		if isAnonymous {
-			cfg = anonymousConfig
-		} else {
-			cfg = defaultConfig
-		}
+		// Get user tier from context (includes subscription service lookup)
+		tier, isAnonymous := GetUserTierFromContext(ctx, r)
 
 		// Check and increment usage, get request type
-		requestType, allowed, err := CheckAndIncrementUsage(ctx, key, cfg.RequestsPerDay, cfg, isAnonymous)
+		requestType, allowed, err := CheckAndIncrementUsage(ctx, key, tier, isAnonymous)
 		if err != nil {
 			// Log error but don't block request
 			logger.GetDailyLogger().Error("Rate limit check failed", "error", err, "key", key)
-			// Continue with request as ProRequest if Redis fails
-			requestType = ProRequest
+			// Continue with request as FreeRequest if Redis fails
+			requestType = FreeRequest
 			allowed = true
 		}
 
@@ -499,158 +499,124 @@ func RateLimitMiddleware(next http.Handler, config RateLimitConfig) http.Handler
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-RateLimit-Blocked", "true")
 
-			// Get current minute usage to determine block reason
-			_, _, minuteCount, minuteReset, err := GetUsageInfo(ctx, key)
-			if err != nil {
-				// Fallback values if Redis fails
-				minuteCount = cfg.RequestsPerMinute
-				minuteReset = time.Now().Add(time.Minute)
-			}
+			// Get tier config for response headers
+			tierConfig, _ := config.GetRateLimitConfig(tier)
 
-			var blockReason string
-			var errorMessage string
-			var retryAfter int
+			// Set rate limit headers
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(tierConfig.RequestsPerDay))
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-Request-Type", string(requestType))
 
-			// Determine the reason for blocking
-			if minuteCount >= cfg.RequestsPerMinute {
-				blockReason = "per-minute-limit"
-				errorMessage = fmt.Sprintf("Too many requests - maximum %d requests per minute allowed", cfg.RequestsPerMinute)
-				retryAfter = int(time.Until(minuteReset).Seconds())
-			} else if isAnonymous {
-				// For anonymous users who've exceeded daily quota
-				blockReason = "daily-quota-exceeded"
-				errorMessage = "You've used all your free requests for today. Sign up to get more!"
-				retryAfter = int(time.Until(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location())).Seconds())
-			} else {
-				// Must be suspicious activity
-				blockReason = "suspicious-activity"
-				errorMessage = "Too many requests - suspicious activity detected"
-
-				// Get block info for suspicious activity
-				_, blockedUntil, _, err := GetBlockingInfo(ctx, key)
-				if err != nil {
-					blockedUntil = time.Now().Add(cfg.BlockDuration)
-				}
-				retryAfter = int(time.Until(blockedUntil).Seconds())
-			}
-
-			w.Header().Set("X-RateLimit-Block-Reason", blockReason)
 			w.WriteHeader(http.StatusTooManyRequests)
-
-			response := map[string]interface{}{
-				"error":       errorMessage,
-				"code":        "RATE_LIMIT_EXCEEDED",
-				"retry_after": retryAfter,
-			}
-
-			if blockReason == "per-minute-limit" {
-				response["reset_time"] = minuteReset.Format(time.RFC3339)
-			} else if blockReason == "daily-quota-exceeded" {
-				response["reset_time"] = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location()).Format(time.RFC3339)
-			} else {
-				if _, blockedUntil, _, err := GetBlockingInfo(ctx, key); err == nil {
-					response["blocked_until"] = blockedUntil.Format(time.RFC3339)
-				}
-			}
-
-			json.NewEncoder(w).Encode(response)
-
-			// Log the blocked request
-			logger.GetDailyLogger().Info("Request blocked", "reason", blockReason, "key", key, "path", r.URL.Path)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Rate limit exceeded. Please try again later.",
+				"type":  "rate_limit_exceeded",
+			})
 			return
 		}
 
-		// Get current usage info for headers
-		currentCount, resetTime, minuteCount, minuteReset, err := GetUsageInfo(ctx, key)
-		if err != nil {
-			// Use fallback values if Redis fails
-			currentCount = 0
-			resetTime = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location())
-			minuteCount = 0
-			minuteReset = time.Now().Add(time.Minute)
-		}
-
-		remaining := cfg.RequestsPerDay - currentCount
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		minuteRemaining := cfg.RequestsPerMinute - minuteCount
-		if minuteRemaining < 0 {
-			minuteRemaining = 0
-		}
-
-		// Log the request with basic info
-		logger.GetDailyLogger().Info("Request processed", "key", key, "method", r.Method, "path", r.URL.Path, "type", string(requestType), "count", currentCount, "daily_limit", cfg.RequestsPerDay, "minute_count", minuteCount, "minute_limit", cfg.RequestsPerMinute)
-
-		// Add comprehensive rate limit headers
-		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(cfg.RequestsPerDay))
-		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
-		w.Header().Set("X-RateLimit-Limit-Minute", strconv.Itoa(cfg.RequestsPerMinute))
-		w.Header().Set("X-RateLimit-Remaining-Minute", strconv.Itoa(minuteRemaining))
-		w.Header().Set("X-RateLimit-Reset-Minute", strconv.FormatInt(minuteReset.Unix(), 10))
-		w.Header().Set("X-Request-Type", string(requestType))
-		w.Header().Set("X-RateLimit-Used", strconv.Itoa(currentCount))
-
-		// Add user-friendly status message
-		var statusMessage string
-		if requestType == ProRequest {
-			if remaining == 1 {
-				statusMessage = fmt.Sprintf("1 pro request remaining today (%d/min remaining)", minuteRemaining)
-			} else {
-				statusMessage = fmt.Sprintf("%d pro requests remaining today (%d/min remaining)", remaining, minuteRemaining)
-			}
-		} else {
-			statusMessage = fmt.Sprintf("All pro requests used - in free mode (%d/min remaining)", minuteRemaining)
-		}
-		w.Header().Set("X-RateLimit-Status", statusMessage)
-
-		// Add request type to context for the handler to use
+		// Add request type to context for downstream handlers
 		ctx = context.WithValue(ctx, RequestTypeContextKey, requestType)
 
-		// Continue to next handler
+		// Get usage info for response headers
+		freeCount, maxCount, resetTime, _, _, err := GetUsageInfo(ctx, key, tier, isAnonymous)
+		if err == nil {
+			tierConfig, _ := config.GetRateLimitConfig(tier)
+
+			// Calculate remaining requests based on request type
+			var remaining int
+			if requestType == MaxRequest {
+				remaining = max(0, tierConfig.MaxRequests-maxCount)
+			} else {
+				if config.IsUnlimited(tierConfig.FreeRequests) {
+					remaining = -1 // Unlimited
+				} else {
+					remaining = max(0, tierConfig.FreeRequests-freeCount)
+				}
+			}
+
+			// Set response headers
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(tierConfig.RequestsPerDay))
+			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+			w.Header().Set("X-Request-Type", string(requestType))
+
+			// Set usage headers
+			w.Header().Set("X-RateLimit-Used-Free", strconv.Itoa(freeCount))
+			w.Header().Set("X-RateLimit-Used-Pro", strconv.Itoa(maxCount))
+		}
+
+		// Continue with the request
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// GetRequestTypeFromContext retrieves the request type from the context
-func GetRequestTypeFromContext(ctx context.Context) (RequestType, bool) {
-	requestType, ok := ctx.Value(RequestTypeContextKey).(RequestType)
-	return requestType, ok
+// Helper function to get max of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
-// getRateLimitKey generates a key for rate limiting based on user ID or IP
+// GetRequestTypeFromContext extracts the request type from context
+func GetRequestTypeFromContext(ctx context.Context) (RequestType, bool) {
+	if reqType, ok := ctx.Value(RequestTypeContextKey).(RequestType); ok {
+		return reqType, true
+	}
+	return FreeRequest, false
+}
+
+// getRateLimitKey generates a rate limit key based on user ID or IP
 func getRateLimitKey(r *http.Request) string {
-	// Try to get user ID from context (set by auth middleware)
+	// Try to get user ID from context first
 	if user, ok := GetFirebaseUserFromContext(r.Context()); ok && user != nil {
 		if IsAnonymousUser(user) {
 			return "anonymous:" + user.UID
 		}
 		return "user:" + user.UID
 	}
-	return "user:global"
+
+	// Fallback to IP address
+	return "ip:" + r.RemoteAddr
 }
 
-// GetRateLimitStats returns current rate limiter statistics
+// Legacy support functions for backward compatibility
 func GetRateLimitStats() map[string]interface{} {
-	ctx := context.Background()
-	stats, err := GetUsageStats(ctx)
-	if err != nil {
-		return map[string]interface{}{
-			"error":           err.Error(),
-			"storage_backend": "redis",
-		}
-	}
+	stats, _ := GetUsageStats(context.Background())
 	return stats
 }
 
-// GetDefaultConfig returns the default rate limiting configuration
 func GetDefaultConfig() RateLimitConfig {
-	return defaultConfig
+	tierConfig, _ := config.GetRateLimitConfig(config.TierFree)
+	suspiciousConfig, _ := config.GetSuspiciousActivityConfig()
+	cleanupConfig, _ := config.GetCleanupConfig()
+
+	return RateLimitConfig{
+		RequestsPerDay:      tierConfig.RequestsPerDay,
+		RequestsPerMinute:   tierConfig.RequestsPerMinute,
+		CleanupInterval:     config.GetDurationFromSeconds(cleanupConfig.Interval),
+		CleanupTTL:          config.GetDurationFromSeconds(cleanupConfig.TTL),
+		SuspiciousThreshold: suspiciousConfig.Threshold,
+		SuspiciousWindow:    config.GetDurationFromSeconds(suspiciousConfig.Window),
+		BlockDuration:       config.GetDurationFromSeconds(suspiciousConfig.BlockDuration),
+		TrackingWindow:      config.GetDurationFromSeconds(suspiciousConfig.TrackingWindow),
+	}
 }
 
-// GetAnonymousConfig returns the anonymous user rate limiting configuration
 func GetAnonymousConfig() RateLimitConfig {
-	return anonymousConfig
+	tierConfig, _ := config.GetRateLimitConfig(config.TierAnonymous)
+	suspiciousConfig, _ := config.GetSuspiciousActivityConfig()
+	cleanupConfig, _ := config.GetCleanupConfig()
+
+	return RateLimitConfig{
+		RequestsPerDay:      tierConfig.RequestsPerDay,
+		RequestsPerMinute:   tierConfig.RequestsPerMinute,
+		CleanupInterval:     config.GetDurationFromSeconds(cleanupConfig.Interval),
+		CleanupTTL:          config.GetDurationFromSeconds(cleanupConfig.TTL),
+		SuspiciousThreshold: suspiciousConfig.Threshold,
+		SuspiciousWindow:    config.GetDurationFromSeconds(suspiciousConfig.Window),
+		BlockDuration:       config.GetDurationFromSeconds(suspiciousConfig.BlockDuration),
+		TrackingWindow:      config.GetDurationFromSeconds(suspiciousConfig.TrackingWindow),
+	}
 }

@@ -12,11 +12,20 @@ import (
 	"time"
 
 	"gateway/aws"
+	"gateway/config"
 	"gateway/middleware"
 	"gateway/models"
 	"gateway/pkg/logger"
 	"gateway/services"
 )
+
+// Helper function to get max of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 type Response struct {
 	Prompt    string `json:"prompt"`
@@ -339,36 +348,44 @@ func GetMetrics() map[string]interface{} {
 func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Get user from context (set by auth middleware)
+	// Get user tier from context (includes subscription service lookup)
+	tier, isAnonymous := middleware.GetUserTierFromContext(ctx, r)
+
+	// Generate rate limit key based on user context
 	user, userOk := middleware.GetFirebaseUserFromContext(ctx)
 	var key string
-	var isAnonymous bool
 
 	if userOk && user != nil {
 		if middleware.IsAnonymousUser(user) {
 			key = "anonymous:" + user.UID
-			isAnonymous = true
 		} else {
 			key = "user:" + user.UID
-			isAnonymous = false
 		}
 	} else {
 		// Fall back to IP address for unauthenticated users
-		key = "user:global"
-		isAnonymous = true
+		key = "ip:" + r.RemoteAddr
+	}
+
+	// Get tier configuration
+	tierConfig, err := config.GetRateLimitConfig(tier)
+	if err != nil {
+		logger.GetDailyLogger().Error("Error getting tier config: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 
 	// Get current usage from Redis
-	currentCount, resetTime, _, _, err := middleware.GetUsageInfo(ctx, key)
+	freeCount, proCount, resetTime, _, _, err := middleware.GetUsageInfo(ctx, key, tier, isAnonymous)
 	if err != nil {
 		logger.GetDailyLogger().Error("Error getting usage info: %v", err)
 		// Use fallback values
-		currentCount = 0
+		freeCount = 0
+		proCount = 0
 		resetTime = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day()+1, 0, 0, 0, 0, time.Now().Location())
 	}
 
 	// Get blocking information
-	isBlocked, blockedUntil, recentRequests, err := middleware.GetBlockingInfo(ctx, key)
+	isBlocked, blockedUntil, recentRequests, err := middleware.GetBlockingInfo(ctx, key, tier, isAnonymous)
 	if err != nil {
 		logger.GetDailyLogger().Error("Error getting blocking info: %v", err)
 		// Use fallback values
@@ -377,57 +394,78 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 		recentRequests = 0
 	}
 
-	// Get the configuration based on user type
-	var config middleware.RateLimitConfig
-	if isAnonymous {
-		config = middleware.GetAnonymousConfig()
-	} else {
-		config = middleware.GetDefaultConfig()
-	}
-	dailyLimit := config.RequestsPerDay
-
-	// Calculate remaining requests
-	remaining := dailyLimit - currentCount
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	// Determine current mode and message
+	// Calculate total requests used and remaining based on tier
+	var totalUsed int
+	var totalRemaining int
 	var currentMode middleware.RequestType
 	var message string
 
 	if isBlocked {
 		currentMode = middleware.FreeRequest
 		message = fmt.Sprintf("Your account is temporarily blocked due to suspicious activity until %s", blockedUntil.Format("15:04:05"))
-	} else if currentCount < dailyLimit {
-		currentMode = middleware.ProRequest
-		if isAnonymous {
-			if remaining == 1 {
-				message = "You have 1 free request remaining today. Sign up to get 10 pro requests daily!"
-			} else {
-				message = fmt.Sprintf("You have %d free requests remaining today. Sign up to get 10 pro requests daily!", remaining)
-			}
-		} else {
-			if remaining == 1 {
-				message = "You have 1 pro request remaining today"
-			} else {
-				message = fmt.Sprintf("You have %d pro requests remaining today", remaining)
-			}
-		}
+		totalUsed = freeCount + proCount
+		totalRemaining = 0
 	} else {
-		currentMode = middleware.FreeRequest
+		// Determine current mode and calculate remaining requests
 		if isAnonymous {
-			message = "You've used all your free requests for today. Sign up to get 10 pro requests daily!"
+			// Anonymous users only have free requests
+			totalUsed = freeCount + proCount
+			totalRemaining = max(0, tierConfig.RequestsPerDay-totalUsed)
+			currentMode = middleware.FreeRequest
+
+			if tierConfig.LifetimeLimit {
+				if totalRemaining == 0 {
+					message = "You've used all your free requests. Sign up to get 100 free requests per day!"
+				} else if totalRemaining == 1 {
+					message = "You have 1 free request remaining. Sign up to get 100 free requests per day!"
+				} else {
+					message = fmt.Sprintf("You have %d free requests remaining. Sign up to get 100 free requests per day!", totalRemaining)
+				}
+			} else {
+				message = "Anonymous users should have lifetime limits - configuration error"
+			}
 		} else {
-			message = "You've used all your pro requests for today."
+			// Authenticated users - check max requests first
+			if tierConfig.MaxRequests > 0 && proCount < tierConfig.MaxRequests {
+				// Still have max requests
+				currentMode = middleware.MaxRequest
+				totalUsed = proCount
+				totalRemaining = tierConfig.MaxRequests - proCount
+
+				if totalRemaining == 1 {
+					message = "You have 1 max request remaining today"
+				} else {
+					message = fmt.Sprintf("You have %d max requests remaining today", totalRemaining)
+				}
+			} else {
+				// Max requests exhausted, check free requests
+				currentMode = middleware.FreeRequest
+
+				if config.IsUnlimited(tierConfig.FreeRequests) {
+					totalUsed = freeCount
+					totalRemaining = 999999 // Large number to indicate unlimited
+					message = "You've used all your max requests for today. Continuing with unlimited free requests."
+				} else {
+					totalUsed = freeCount
+					totalRemaining = max(0, tierConfig.FreeRequests-freeCount)
+
+					if totalRemaining == 0 {
+						message = "You've used all your requests for today."
+					} else if totalRemaining == 1 {
+						message = "You have 1 free request remaining today"
+					} else {
+						message = fmt.Sprintf("You have %d free requests remaining today", totalRemaining)
+					}
+				}
+			}
 		}
 	}
 
 	// Create response
 	status := RateLimitStatus{
-		DailyLimit:        dailyLimit,
-		RequestsUsed:      currentCount,
-		RequestsRemaining: remaining,
+		DailyLimit:        tierConfig.RequestsPerDay,
+		RequestsUsed:      totalUsed,
+		RequestsRemaining: totalRemaining,
 		CurrentMode:       currentMode,
 		ResetTime:         resetTime,
 		ResetTimeUnix:     resetTime.Unix(),
@@ -443,9 +481,10 @@ func RateLimitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add suspicious activity configuration
-	status.SuspiciousConfig.Threshold = config.SuspiciousThreshold
-	status.SuspiciousConfig.Window = config.SuspiciousWindow.String()
-	status.SuspiciousConfig.Duration = config.BlockDuration.String()
+	suspiciousConfig, _ := config.GetSuspiciousActivityConfig()
+	status.SuspiciousConfig.Threshold = suspiciousConfig.Threshold
+	status.SuspiciousConfig.Window = fmt.Sprintf("%ds", suspiciousConfig.Window)
+	status.SuspiciousConfig.Duration = fmt.Sprintf("%ds", suspiciousConfig.BlockDuration)
 
 	// Add user info if authenticated
 	if userOk && user != nil {
